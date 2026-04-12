@@ -1,29 +1,48 @@
 import React, { useState } from 'react';
 import { useAuth } from '../AuthContext';
 import { db } from '../firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { Store as StoreIcon, ArrowRight } from 'lucide-react';
+import { collection, addDoc, serverTimestamp, query, where, getDocs } from 'firebase/firestore';
+import { Store as StoreIcon, ArrowRight, AlertCircle } from 'lucide-react';
 
 export function SetupStore() {
   const { user } = useAuth();
   const [name, setName] = useState('');
   const [subdomain, setSubdomain] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
 
     setLoading(true);
+    setError(null);
     try {
+      const cleanSubdomain = subdomain.toLowerCase().trim();
+      
+      // Check for uniqueness
+      const storesRef = collection(db, 'stores');
+      const q = query(storesRef, where('subdomain', '==', cleanSubdomain));
+      const querySnapshot = await getDocs(q);
+      
+      if (!querySnapshot.empty) {
+        setError('이미 사용 중인 서브도메인입니다. 다른 이름을 선택해주세요.');
+        setLoading(false);
+        return;
+      }
+
       await addDoc(collection(db, 'stores'), {
         ownerId: user.uid,
         name,
-        subdomain: subdomain.toLowerCase(),
+        subdomain: cleanSubdomain,
         createdAt: serverTimestamp(),
       });
+      
+      // Redirect to subdomain after creation
+      window.location.href = `https://${cleanSubdomain}.pos.n-e.kr`;
     } catch (error) {
       console.error('Store setup failed', error);
+      setError('매장 설정 중 오류가 발생했습니다. 다시 시도해주세요.');
     } finally {
       setLoading(false);
     }
@@ -39,6 +58,13 @@ export function SetupStore() {
           <h1 className="text-2xl font-display font-bold text-slate-900">매장 설정하기</h1>
           <p className="text-slate-500 mt-2">NodKrai POS를 시작하기 위해 매장 정보를 입력해주세요.</p>
         </div>
+
+        {error && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3 text-red-600 animate-shake">
+            <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+            <p className="text-sm font-medium">{error}</p>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>

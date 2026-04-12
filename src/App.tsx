@@ -21,6 +21,21 @@ function AppContent() {
   const { user, store, loading } = useAuth();
   const [activeTab, setActiveTab] = useState('dashboard');
 
+  // Redirect to subdomain if logged in and store exists, and not already on that subdomain
+  React.useEffect(() => {
+    if (user && store && store.subdomain) {
+      const currentHost = window.location.hostname;
+      const targetSubdomain = `${store.subdomain}.pos.n-e.kr`;
+      
+      // Only redirect if we are on the main domain or a different subdomain
+      // Note: In development/preview, we might not want to redirect if it breaks the environment
+      // But based on user request "로그인하면 (서브도메인이름).pos.n-e.kr으로 링크가 되게끔 해줘"
+      if (currentHost !== targetSubdomain && !currentHost.includes('run.app')) {
+        window.location.href = `https://${targetSubdomain}`;
+      }
+    }
+  }, [user, store]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">

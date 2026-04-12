@@ -78,7 +78,8 @@ service cloud.firestore {
     // ===============================================================
 
     match /stores/{storeId} {
-      allow read: if isAuthenticated(); // Allow reading store info if logged in (for POS access)
+      allow list: if isAuthenticated(); // Allow listing for subdomain uniqueness check
+      allow get: if isAuthenticated(); // Allow reading store info if logged in (for POS access)
       allow create: if isAuthenticated() && isNewStoreOwner() && isValidStore(request.resource.data);
       allow update: if isStoreOwner(storeId) && isValidStore(request.resource.data);
       allow delete: if isStoreOwner(storeId);
