@@ -52,6 +52,10 @@ export function POSSeller() {
     setCart(prev => {
       const existing = prev.find(item => item.id === product.id);
       if (existing) {
+        if (existing.quantity >= product.stock) {
+          alert('재고가 부족합니다.');
+          return prev;
+        }
         return prev.map(item => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item);
       }
       return [...prev, { ...product, quantity: 1 }];
@@ -63,10 +67,17 @@ export function POSSeller() {
   };
 
   const updateQuantity = (productId: string, delta: number) => {
+    const product = products.find(p => p.id === productId);
+    if (!product) return;
+
     setCart(prev => prev.map(item => {
       if (item.id === productId) {
-        const newQty = Math.max(1, item.quantity + delta);
-        return { ...item, quantity: newQty };
+        const newQty = item.quantity + delta;
+        if (newQty > product.stock) {
+          alert('재고가 부족합니다.');
+          return item;
+        }
+        return { ...item, quantity: Math.max(1, newQty) };
       }
       return item;
     }));
@@ -92,6 +103,16 @@ export function POSSeller() {
 
     setIsProcessing(true);
     try {
+      // Final Stock Check
+      for (const item of cart) {
+        const p = products.find(prod => prod.id === item.id);
+        if (p && p.stock < item.quantity) {
+          alert(`${item.name}의 재고가 부족합니다. (현재 재고: ${p.stock})`);
+          setIsProcessing(false);
+          return;
+        }
+      }
+
       // 1. Record Sale
       await addDoc(collection(db, `stores/${store.id}/sales`), {
         storeId: store.id,
@@ -130,6 +151,16 @@ export function POSSeller() {
     setIsProcessing(true);
     try {
       if (isDirectCheckout) {
+        // Final Stock Check
+        for (const item of cart) {
+          const p = products.find(prod => prod.id === item.id);
+          if (p && p.stock < item.quantity) {
+            alert(`${item.name}의 재고가 부족합니다. (현재 재고: ${p.stock})`);
+            setIsProcessing(false);
+            return;
+          }
+        }
+
         // Direct POS Checkout
         await addDoc(collection(db, `stores/${store.id}/sales`), {
           storeId: store.id,
@@ -151,6 +182,16 @@ export function POSSeller() {
         setCart([]);
         setIsDirectCheckout(false);
       } else {
+        // Final Stock Check for Kiosk Sale
+        for (const item of selectedSale.items) {
+          const p = products.find(prod => prod.id === item.id);
+          if (p && p.stock < item.quantity) {
+            alert(`${item.name}의 재고가 부족합니다. (현재 재고: ${p.stock})\n주문을 거절하거나 재고를 확인해주세요.`);
+            setIsProcessing(false);
+            return;
+          }
+        }
+
         // Pending Kiosk Sale
         await updateDoc(doc(db, `stores/${store.id}/sales`, selectedSale.id), {
           status: 'completed',

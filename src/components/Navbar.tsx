@@ -70,7 +70,7 @@ export function Navbar() {
                   to={`/admin/${store.subdomain}/product`}
                   active={isActive('/product')} 
                   icon={<Package className="w-4 h-4" />}
-                  label="재고관리"
+                  label="제품"
                 />
                 <NavButton 
                   to={`/admin/${store.subdomain}/setting`}

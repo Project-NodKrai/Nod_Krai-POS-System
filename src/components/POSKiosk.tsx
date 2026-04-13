@@ -91,6 +91,10 @@ export function POSKiosk({ onExit, storeOverride }: { onExit: () => void, storeO
     setCart(prev => {
       const existing = prev.find(item => item.id === product.id);
       if (existing) {
+        if (existing.quantity >= product.stock) {
+          alert('재고가 부족합니다.');
+          return prev;
+        }
         return prev.map(item => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item);
       }
       return [...prev, { ...product, quantity: 1 }];
@@ -98,10 +102,17 @@ export function POSKiosk({ onExit, storeOverride }: { onExit: () => void, storeO
   };
 
   const updateQuantity = (productId: string, delta: number) => {
+    const product = products.find(p => p.id === productId);
+    if (!product) return;
+
     setCart(prev => prev.map(item => {
       if (item.id === productId) {
-        const newQty = Math.max(0, item.quantity + delta);
-        return { ...item, quantity: newQty };
+        const newQty = item.quantity + delta;
+        if (newQty > product.stock) {
+          alert('재고가 부족합니다.');
+          return item;
+        }
+        return { ...item, quantity: Math.max(0, newQty) };
       }
       return item;
     }).filter(item => item.quantity > 0));
@@ -115,6 +126,15 @@ export function POSKiosk({ onExit, storeOverride }: { onExit: () => void, storeO
 
   const handleCheckout = async (method: 'card' | 'cash' | 'transfer') => {
     if (!store || cart.length === 0) return;
+    
+    // Final Stock Check
+    for (const item of cart) {
+      const p = products.find(prod => prod.id === item.id);
+      if (p && p.stock < item.quantity) {
+        alert(`${item.name}의 재고가 부족합니다. (현재 재고: ${p.stock})`);
+        return;
+      }
+    }
     
     try {
       const saleData = {
