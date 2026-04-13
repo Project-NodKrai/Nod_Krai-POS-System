@@ -73,6 +73,12 @@ export function Navbar() {
                   label="제품"
                 />
                 <NavButton 
+                  to={`/admin/${store.subdomain}/analytics`}
+                  active={isActive('/analytics')} 
+                  icon={<BarChart3 className="w-4 h-4" />}
+                  label="분석 통계"
+                />
+                <NavButton 
                   to={`/admin/${store.subdomain}/setting`}
                   active={isActive('/setting')} 
                   icon={<SettingsIcon className="w-4 h-4" />}

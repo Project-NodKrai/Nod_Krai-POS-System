@@ -116,17 +116,29 @@ export function Settings() {
     XLSX.utils.book_append_sheet(wb, detailWs, "판매 상세");
 
     const productsSnap = await getDocs(collection(db, `stores/${store.id}/products`));
-    const inventoryData = productsSnap.docs.map(doc => {
-      const p = doc.data();
-      return {
-        '상품명': p.name,
-        '카테고리': p.category,
-        '원가': p.cost || 0,
-        '판매가': p.price,
-        '현재 재고': p.stock,
-        '안전 재고': p.minStock || 5
-      };
-    });
+    const allProducts = productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[];
+
+    const getEffectiveStock = (product: any) => {
+      if (!product.isSet || !product.components || product.components.length === 0) {
+        return product.stock;
+      }
+      const stocks = product.components.map((comp: any) => {
+        const p = allProducts.find(prod => prod.id === comp.id);
+        if (!p) return 0;
+        return Math.floor(p.stock / comp.quantity);
+      });
+      return Math.min(...stocks);
+    };
+
+    const inventoryData = allProducts.map(p => ({
+      '상품명': p.name,
+      '카테고리': p.category,
+      '세트 여부': p.isSet ? 'Y' : 'N',
+      '원가': p.cost || 0,
+      '판매가': p.price,
+      '현재 재고': getEffectiveStock(p),
+      '안전 재고': p.minStock || 5
+    }));
     const inventoryWs = XLSX.utils.json_to_sheet(inventoryData);
     XLSX.utils.book_append_sheet(wb, inventoryWs, "제품 현황");
 

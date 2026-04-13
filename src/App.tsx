@@ -12,6 +12,7 @@ import { Inventory } from './components/Inventory';
 import { POSSeller } from './components/POSSeller';
 import { POSKiosk } from './components/POSKiosk';
 import { Settings } from './components/Settings';
+import { Analytics } from './components/Analytics';
 import { LogIn, Store as StoreIcon } from 'lucide-react';
 import { auth, db } from './firebase';
 import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
@@ -219,6 +220,7 @@ function AppContent() {
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="product" element={<Inventory />} />
           <Route path="POS" element={<POSSeller />} />
+          <Route path="analytics" element={<Analytics />} />
           <Route path="setting" element={<Settings />} />
           <Route path="/" element={<Navigate to="dashboard" replace />} />
         </Routes>

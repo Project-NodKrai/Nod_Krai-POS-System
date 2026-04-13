@@ -3,15 +3,41 @@ import { useAuth } from '../AuthContext';
 import { db } from '../firebase';
 import { collection, query, where, onSnapshot, orderBy, limit } from 'firebase/firestore';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
-import { TrendingUp, ShoppingBag, Users, DollarSign, Download } from 'lucide-react';
+import { TrendingUp, ShoppingBag, Users, DollarSign, Download, Target, Edit2 } from 'lucide-react';
 import { formatCurrency, cn } from '../lib/utils';
 import * as XLSX from 'xlsx';
+import { doc, updateDoc } from 'firebase/firestore';
 
 export function Dashboard() {
   const { store } = useAuth();
   const [sales, setSales] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [dailyGoal, setDailyGoal] = useState(0);
+  const [isEditingGoal, setIsEditingGoal] = useState(false);
+  const [goalInput, setGoalInput] = useState('');
+
+  useEffect(() => {
+    if (!store) return;
+    setDailyGoal(store.dailyGoal || 0);
+    setGoalInput((store.dailyGoal || 0).toString());
+  }, [store]);
+
+  const handleUpdateGoal = async () => {
+    if (!store) return;
+    const newGoal = Number(goalInput);
+    if (isNaN(newGoal)) return;
+
+    try {
+      await updateDoc(doc(db, 'stores', store.id), {
+        dailyGoal: newGoal
+      });
+      setDailyGoal(newGoal);
+      setIsEditingGoal(false);
+    } catch (error) {
+      console.error('Failed to update goal', error);
+    }
+  };
 
   useEffect(() => {
     if (!store) return;
@@ -82,13 +108,26 @@ export function Dashboard() {
     const detailWs = XLSX.utils.json_to_sheet(detailData);
     XLSX.utils.book_append_sheet(wb, detailWs, "판매 상세");
 
+    const getEffectiveStock = (product: any) => {
+      if (!product.isSet || !product.components || product.components.length === 0) {
+        return product.stock;
+      }
+      const stocks = product.components.map((comp: any) => {
+        const p = products.find(prod => prod.id === comp.id);
+        if (!p) return 0;
+        return Math.floor(p.stock / comp.quantity);
+      });
+      return Math.min(...stocks);
+    };
+
     // 3. 제품 현황
     const inventoryData = products.map(p => ({
       '상품명': p.name,
       '카테고리': p.category,
+      '세트 여부': p.isSet ? 'Y' : 'N',
       '원가': p.cost || 0,
       '판매가': p.price,
-      '현재 재고': p.stock,
+      '현재 재고': getEffectiveStock(p),
       '안전 재고': p.minStock || 5
     }));
     const inventoryWs = XLSX.utils.json_to_sheet(inventoryData);
@@ -106,6 +145,7 @@ export function Dashboard() {
   });
 
   const totalRevenue = todaySales.reduce((acc, s) => acc + s.totalAmount, 0);
+  const goalProgress = dailyGoal > 0 ? Math.min(100, (totalRevenue / dailyGoal) * 100) : 0;
 
   // Prepare chart data (last 7 days)
   const chartData = Array.from({ length: 7 }).map((_, i) => {
@@ -133,6 +173,71 @@ export function Dashboard() {
           <Download className="w-4 h-4" />
           엑셀 내보내기
         </button>
+      </div>
+
+      {/* Daily Goal Progress Bar */}
+      <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+              <Target className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-bold text-slate-900">오늘의 목표 달성률</h3>
+              <p className="text-xs text-slate-500">목표 매출액 대비 현재 실적입니다.</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="text-right">
+              <p className="text-xs font-bold text-slate-400 uppercase">현재 / 목표</p>
+              <p className="text-lg font-display font-bold text-slate-900">
+                {formatCurrency(totalRevenue)} / <span className="text-indigo-600">{formatCurrency(dailyGoal)}</span>
+              </p>
+            </div>
+            {isEditingGoal ? (
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  value={goalInput}
+                  onChange={(e) => setGoalInput(e.target.value)}
+                  className="w-24 px-2 py-1 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="목표액"
+                />
+                <button 
+                  onClick={handleUpdateGoal}
+                  className="bg-indigo-600 text-white px-3 py-1 rounded-lg text-xs font-bold"
+                >
+                  저장
+                </button>
+                <button 
+                  onClick={() => setIsEditingGoal(false)}
+                  className="text-slate-400 text-xs"
+                >
+                  취소
+                </button>
+              </div>
+            ) : (
+              <button 
+                onClick={() => setIsEditingGoal(true)}
+                className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+              >
+                <Edit2 className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="relative h-4 bg-slate-100 rounded-full overflow-hidden">
+          <div 
+            className="absolute top-0 left-0 h-full bg-indigo-600 transition-all duration-1000 ease-out"
+            style={{ width: `${goalProgress}%` }}
+          >
+            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-shimmer" />
+          </div>
+        </div>
+        <div className="flex justify-between mt-2">
+          <span className="text-xs font-bold text-slate-400">{goalProgress.toFixed(1)}% 달성</span>
+          <span className="text-xs font-bold text-slate-400">{formatCurrency(Math.max(0, dailyGoal - totalRevenue))} 남음</span>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">

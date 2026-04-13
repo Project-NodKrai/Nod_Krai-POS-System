@@ -80,18 +80,32 @@ export function POSKiosk({ onExit, storeOverride }: { onExit: () => void, storeO
 
   const categoryOptions = ['전체', ...categories.map(c => c.name)];
 
+  const getEffectiveStock = (product: any) => {
+    if (!product.isSet || !product.components || product.components.length === 0) {
+      return product.stock;
+    }
+    const stocks = product.components.map((comp: any) => {
+      const p = products.find(prod => prod.id === comp.id);
+      if (!p) return 0;
+      return Math.floor(p.stock / comp.quantity);
+    });
+    return Math.min(...stocks);
+  };
+
   const filteredProducts = products.filter(p => {
+    const effectiveStock = getEffectiveStock(p);
     const matchesCategory = category === '전체' || (p.category || '전체') === category;
-    const isVisible = !store?.hideOutOfStock || p.stock > 0;
+    const isVisible = !store?.hideOutOfStock || effectiveStock > 0;
     return matchesCategory && isVisible;
   });
 
   const addToCart = (product: any) => {
-    if (product.stock <= 0) return;
+    const effectiveStock = getEffectiveStock(product);
+    if (effectiveStock <= 0) return;
     setCart(prev => {
       const existing = prev.find(item => item.id === product.id);
       if (existing) {
-        if (existing.quantity >= product.stock) {
+        if (existing.quantity >= effectiveStock) {
           alert('재고가 부족합니다.');
           return prev;
         }
@@ -105,10 +119,12 @@ export function POSKiosk({ onExit, storeOverride }: { onExit: () => void, storeO
     const product = products.find(p => p.id === productId);
     if (!product) return;
 
+    const effectiveStock = getEffectiveStock(product);
+
     setCart(prev => prev.map(item => {
       if (item.id === productId) {
         const newQty = item.quantity + delta;
-        if (newQty > product.stock) {
+        if (newQty > effectiveStock) {
           alert('재고가 부족합니다.');
           return item;
         }
@@ -128,10 +144,21 @@ export function POSKiosk({ onExit, storeOverride }: { onExit: () => void, storeO
     if (!store || cart.length === 0) return;
     
     // Final Stock Check
+    const stockCheckMap: Record<string, number> = {};
     for (const item of cart) {
-      const p = products.find(prod => prod.id === item.id);
-      if (p && p.stock < item.quantity) {
-        alert(`${item.name}의 재고가 부족합니다. (현재 재고: ${p.stock})`);
+      if (item.isSet && item.components) {
+        item.components.forEach((comp: any) => {
+          stockCheckMap[comp.id] = (stockCheckMap[comp.id] || 0) + (comp.quantity * item.quantity);
+        });
+      } else {
+        stockCheckMap[item.id] = (stockCheckMap[item.id] || 0) + item.quantity;
+      }
+    }
+    
+    for (const [productId, totalQty] of Object.entries(stockCheckMap)) {
+      const p = products.find(prod => prod.id === productId);
+      if (p && p.stock < totalQty) {
+        alert(`${p.name}의 재고가 부족합니다. (현재 재고: ${p.stock})`);
         return;
       }
     }
@@ -139,7 +166,14 @@ export function POSKiosk({ onExit, storeOverride }: { onExit: () => void, storeO
     try {
       const saleData = {
         storeId: store.id,
-        items: cart.map(item => ({ id: item.id, name: item.name, price: item.price, quantity: item.quantity })),
+        items: cart.map(item => ({ 
+          id: item.id, 
+          name: item.name, 
+          price: item.price, 
+          quantity: item.quantity,
+          isSet: item.isSet || false,
+          components: item.components || []
+        })),
         totalAmount: total,
         paymentMethod: method,
         status: method === 'card' ? 'completed' : 'pending',
@@ -153,9 +187,17 @@ export function POSKiosk({ onExit, storeOverride }: { onExit: () => void, storeO
 
       if (method === 'card') {
         for (const item of cart) {
-          await updateDoc(doc(db, `stores/${store.id}/products`, item.id), {
-            stock: increment(-item.quantity)
-          });
+          if (item.isSet && item.components) {
+            for (const comp of item.components) {
+              await updateDoc(doc(db, `stores/${store.id}/products`, comp.id), {
+                stock: increment(-(comp.quantity * item.quantity))
+              });
+            }
+          } else {
+            await updateDoc(doc(db, `stores/${store.id}/products`, item.id), {
+              stock: increment(-item.quantity)
+            });
+          }
         }
         setStep('success');
         setCart([]);
@@ -352,41 +394,51 @@ export function POSKiosk({ onExit, storeOverride }: { onExit: () => void, storeO
       {/* Main Menu Area */}
       <div className="flex-1 p-8 overflow-y-auto">
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6">
-          {filteredProducts.map(product => (
-            <button
-              key={product.id}
-              onClick={() => addToCart(product)}
-              disabled={product.stock <= 0}
-              className={cn(
-                "bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden flex flex-col text-left transition-all active:scale-95",
-                product.stock <= 0 && "opacity-50 grayscale"
-              )}
-            >
-              <div className="aspect-square bg-slate-50 relative">
-                {product.imageUrl ? (
-                  <img src={product.imageUrl} alt="" className="w-full h-full object-cover" />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-slate-200">
-                    <ShoppingCart className="w-12 h-12" />
-                  </div>
+          {filteredProducts.map(product => {
+            const effectiveStock = getEffectiveStock(product);
+            return (
+              <button
+                key={product.id}
+                onClick={() => addToCart(product)}
+                disabled={effectiveStock <= 0}
+                className={cn(
+                  "bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden flex flex-col text-left transition-all active:scale-95",
+                  effectiveStock <= 0 && "opacity-50 grayscale"
                 )}
-                {product.stock <= (store?.lowStockThreshold || 5) && product.stock > 0 && (
-                  <div className="absolute top-3 left-3 bg-orange-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg">
-                    품절 임박
+              >
+                <div className="aspect-square bg-slate-50 relative">
+                  {product.imageUrl ? (
+                    <img src={product.imageUrl} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-slate-200">
+                      <ShoppingCart className="w-12 h-12" />
+                    </div>
+                  )}
+                  <div className="absolute top-3 right-3 flex flex-col items-end gap-1">
+                    {product.isSet && (
+                      <div className="bg-amber-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg">
+                        세트
+                      </div>
+                    )}
+                    {effectiveStock <= (store?.lowStockThreshold || 5) && effectiveStock > 0 && (
+                      <div className="bg-orange-500 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg">
+                        품절 임박
+                      </div>
+                    )}
                   </div>
-                )}
-                {product.stock <= 0 && (
-                  <div className="absolute inset-0 bg-slate-900/40 flex items-center justify-center backdrop-blur-sm">
-                    <span className="text-white font-black text-2xl rotate-[-15deg] border-4 border-white px-4 py-1">품절</span>
-                  </div>
-                )}
-              </div>
-              <div className="p-5 flex-1 flex flex-col">
-                <h4 className="text-lg font-bold text-slate-900 mb-1 line-clamp-2">{product.name}</h4>
-                <p className="text-xl font-display font-black text-indigo-600 mt-auto">{formatCurrency(product.price)}</p>
-              </div>
-            </button>
-          ))}
+                  {effectiveStock <= 0 && (
+                    <div className="absolute inset-0 bg-slate-900/40 flex items-center justify-center backdrop-blur-sm">
+                      <span className="text-white font-black text-2xl rotate-[-15deg] border-4 border-white px-4 py-1">품절</span>
+                    </div>
+                  )}
+                </div>
+                <div className="p-5 flex-1 flex flex-col">
+                  <h4 className="text-lg font-bold text-slate-900 mb-1 line-clamp-2">{product.name}</h4>
+                  <p className="text-xl font-display font-black text-indigo-600 mt-auto">{formatCurrency(product.price)}</p>
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
 

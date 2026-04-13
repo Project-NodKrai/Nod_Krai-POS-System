@@ -28,14 +28,16 @@ export function Inventory() {
   const [newCategoryName, setNewCategoryName] = useState('');
 
   // Form state
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<any>({
     name: '',
     category: '',
     price: 0,
     cost: 0,
     stock: 0,
     minStock: 5,
-    imageUrl: ''
+    imageUrl: '',
+    isSet: false,
+    components: []
   });
 
   useEffect(() => {
@@ -75,7 +77,17 @@ export function Inventory() {
       }
       setIsModalOpen(false);
       setEditingProduct(null);
-      setFormData({ name: '', category: '', price: 0, cost: 0, stock: 0, minStock: 5, imageUrl: '' });
+      setFormData({ 
+        name: '', 
+        category: '', 
+        price: 0, 
+        cost: 0, 
+        stock: 0, 
+        minStock: 5, 
+        imageUrl: '',
+        isSet: false,
+        components: []
+      });
     } catch (error) {
       console.error('Save failed', error);
     }
@@ -216,9 +228,11 @@ export function Inventory() {
       const inventoryData = products.map(p => ({
         '상품명': p.name,
         '카테고리': p.category,
+        '세트 여부': p.isSet ? 'Y' : 'N',
+        '구성 상품': p.isSet ? p.components?.map((c: any) => `${c.name}(${c.quantity})`).join(', ') : '-',
         '원가': p.cost || 0,
         '판매가': p.price,
-        '현재 재고': p.stock,
+        '현재 재고': getEffectiveStock(p),
         '안전 재고': p.minStock || 5
       }));
       const inventoryWs = XLSX.utils.json_to_sheet(inventoryData);
@@ -233,9 +247,34 @@ export function Inventory() {
     }
   };
 
+  const getEffectiveStock = (product: any) => {
+    if (!product.isSet || !product.components || product.components.length === 0) {
+      return product.stock;
+    }
+    const stocks = product.components.map((comp: any) => {
+      const p = products.find(prod => prod.id === comp.id);
+      if (!p) return 0;
+      return Math.floor(p.stock / comp.quantity);
+    });
+    return Math.min(...stocks);
+  };
+
+  useEffect(() => {
+    if (formData.isSet && formData.components.length > 0) {
+      const calculatedCost = formData.components.reduce((acc: number, comp: any) => {
+        const p = products.find(prod => prod.id === comp.id);
+        return acc + ((p?.cost || 0) * comp.quantity);
+      }, 0);
+      // Only update if it's different to avoid unnecessary state updates
+      if (calculatedCost !== formData.cost) {
+        setFormData(prev => ({ ...prev, cost: calculatedCost }));
+      }
+    }
+  }, [formData.components]);
+
   const filteredProducts = products.filter(p => 
     p.name.toLowerCase().includes(search.toLowerCase()) || 
-    p.category.toLowerCase().includes(search.toLowerCase())
+    (p.category || '').toLowerCase().includes(search.toLowerCase())
   );
 
   return (
@@ -256,7 +295,42 @@ export function Inventory() {
                 카테고리 관리
               </button>
               <button 
-                onClick={() => { setIsModalOpen(true); setEditingProduct(null); setFormData({ name: '', category: '', price: 0, cost: 0, stock: 0, minStock: 5, imageUrl: '' }); }}
+                onClick={() => { 
+                  setIsModalOpen(true); 
+                  setEditingProduct(null); 
+                  setFormData({ 
+                    name: '', 
+                    category: '', 
+                    price: 0, 
+                    cost: 0, 
+                    stock: 0, 
+                    minStock: 5, 
+                    imageUrl: '',
+                    isSet: true,
+                    components: []
+                  }); 
+                }}
+                className="flex items-center gap-2 bg-amber-500 text-white px-6 py-2.5 rounded-xl font-semibold hover:bg-amber-600 transition-all shadow-lg shadow-amber-200"
+              >
+                <ShoppingBag className="w-5 h-5" />
+                세트 추가
+              </button>
+              <button 
+                onClick={() => { 
+                  setIsModalOpen(true); 
+                  setEditingProduct(null); 
+                  setFormData({ 
+                    name: '', 
+                    category: '', 
+                    price: 0, 
+                    cost: 0, 
+                    stock: 0, 
+                    minStock: 5, 
+                    imageUrl: '',
+                    isSet: false,
+                    components: []
+                  }); 
+                }}
                 className="flex items-center gap-2 bg-indigo-600 text-white px-6 py-2.5 rounded-xl font-semibold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
               >
                 <Plus className="w-5 h-5" />
@@ -347,7 +421,12 @@ export function Inventory() {
                           )}
                         </div>
                         <div>
-                          <p className="text-sm font-bold text-slate-900">{product.name}</p>
+                          <p className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                            {product.name}
+                            {product.isSet && (
+                              <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-1.5 py-0.5 rounded">세트</span>
+                            )}
+                          </p>
                         </div>
                       </div>
                     </td>
@@ -364,11 +443,11 @@ export function Inventory() {
                       <div className="flex items-center gap-2">
                         <span className={cn(
                           "text-sm font-bold",
-                          product.stock <= product.minStock ? "text-red-500" : "text-slate-900"
+                          getEffectiveStock(product) <= (product.minStock || 5) ? "text-red-500" : "text-slate-900"
                         )}>
-                          {product.stock}
+                          {getEffectiveStock(product)}
                         </span>
-                        {product.stock <= product.minStock && (
+                        {getEffectiveStock(product) <= (product.minStock || 5) && (
                           <span className="px-2 py-0.5 bg-red-50 text-red-600 rounded text-[10px] font-bold uppercase">Low</span>
                         )}
                       </div>
@@ -628,13 +707,17 @@ export function Inventory() {
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in duration-200">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center">
-              <h2 className="text-xl font-bold">{editingProduct ? '상품 수정' : '새 상품 등록'}</h2>
+              <h2 className="text-xl font-bold">
+                {editingProduct ? '상품 수정' : formData.isSet ? '새 세트 등록' : '새 상품 등록'}
+              </h2>
               <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600">&times;</button>
             </div>
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="col-span-2">
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">상품명</label>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
+                    {formData.isSet ? '세트명' : '상품명'}
+                  </label>
                   <input 
                     required 
                     value={formData.name} 
@@ -642,6 +725,60 @@ export function Inventory() {
                     className="w-full px-4 py-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500" 
                   />
                 </div>
+                {formData.isSet && (
+                  <div className="col-span-2 space-y-3 p-4 bg-slate-50 rounded-xl border border-slate-200">
+                    <label className="block text-xs font-bold text-slate-500 uppercase">구성 상품 설정</label>
+                    <div className="space-y-2">
+                      {formData.components.map((comp: any, idx: number) => (
+                        <div key={idx} className="flex gap-2 items-center">
+                          <select
+                            value={comp.id}
+                            onChange={(e) => {
+                              const selected = products.find(p => p.id === e.target.value);
+                              const newComps = [...formData.components];
+                              newComps[idx] = { ...newComps[idx], id: e.target.value, name: selected?.name || '' };
+                              setFormData({ ...formData, components: newComps });
+                            }}
+                            className="flex-1 px-3 py-1.5 text-sm border border-slate-200 rounded-lg outline-none"
+                          >
+                            <option value="">상품 선택</option>
+                            {products.filter(p => !p.isSet).map(p => (
+                              <option key={p.id} value={p.id}>{p.name} (재고: {p.stock})</option>
+                            ))}
+                          </select>
+                          <input
+                            type="number"
+                            min="1"
+                            value={comp.quantity}
+                            onChange={(e) => {
+                              const newComps = [...formData.components];
+                              newComps[idx] = { ...newComps[idx], quantity: Number(e.target.value) };
+                              setFormData({ ...formData, components: newComps });
+                            }}
+                            className="w-20 px-3 py-1.5 text-sm border border-slate-200 rounded-lg outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const newComps = formData.components.filter((_: any, i: number) => i !== idx);
+                              setFormData({ ...formData, components: newComps });
+                            }}
+                            className="p-1.5 text-slate-400 hover:text-red-500"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, components: [...formData.components, { id: '', name: '', quantity: 1 }] })}
+                        className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1"
+                      >
+                        <Plus className="w-3 h-3" /> 구성 상품 추가
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <div className="col-span-2">
                   <label className="block text-xs font-bold text-slate-500 uppercase mb-1">카테고리</label>
                   <select 
@@ -684,13 +821,27 @@ export function Inventory() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">현재 재고</label>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
+                    {formData.isSet ? '최대 가능 재고 (자동계산)' : '현재 재고'}
+                  </label>
                   <input 
                     type="number" 
                     required 
-                    value={formData.stock} 
-                    onChange={e => setFormData({...formData, stock: Number(e.target.value)})}
-                    className="w-full px-4 py-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500" 
+                    readOnly={formData.isSet}
+                    value={formData.isSet ? (() => {
+                      if (formData.components.length === 0) return 0;
+                      const stocks = formData.components.map((comp: any) => {
+                        const p = products.find(prod => prod.id === comp.id);
+                        if (!p) return 0;
+                        return Math.floor(p.stock / comp.quantity);
+                      });
+                      return Math.min(...stocks);
+                    })() : formData.stock} 
+                    onChange={e => !formData.isSet && setFormData({...formData, stock: Number(e.target.value)})}
+                    className={cn(
+                      "w-full px-4 py-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500",
+                      formData.isSet && "bg-slate-50 text-slate-500 cursor-not-allowed"
+                    )} 
                   />
                 </div>
                 <div>

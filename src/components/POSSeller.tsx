@@ -64,8 +64,21 @@ export function POSSeller() {
 
   const categoryOptions = ['전체', ...categories.map(c => c.name)];
 
+  const getEffectiveStock = (product: any) => {
+    if (!product.isSet || !product.components || product.components.length === 0) {
+      return product.stock;
+    }
+    const stocks = product.components.map((comp: any) => {
+      const p = products.find(prod => prod.id === comp.id);
+      if (!p) return 0;
+      return Math.floor(p.stock / comp.quantity);
+    });
+    return Math.min(...stocks);
+  };
+
   const addToCart = (product: any, isService: boolean = false) => {
-    if (product.stock <= 0) return;
+    const effectiveStock = getEffectiveStock(product);
+    if (effectiveStock <= 0) return;
     setCart(prev => {
       const cartItemId = isService ? `${product.id}-service` : product.id;
       const existing = prev.find(item => item.cartItemId === cartItemId);
@@ -75,7 +88,7 @@ export function POSSeller() {
         .filter(item => item.id === product.id)
         .reduce((acc, item) => acc + item.quantity, 0);
 
-      if (totalInCart >= product.stock) {
+      if (totalInCart >= effectiveStock) {
         alert('재고가 부족합니다.');
         return prev;
       }
@@ -104,6 +117,8 @@ export function POSSeller() {
     const product = products.find(p => p.id === itemInCart.id);
     if (!product) return;
 
+    const effectiveStock = getEffectiveStock(product);
+
     setCart(prev => {
       const newQty = itemInCart.quantity + delta;
       if (newQty < 1) return prev;
@@ -113,7 +128,7 @@ export function POSSeller() {
         .filter(item => item.id === product.id && item.cartItemId !== cartItemId)
         .reduce((acc, item) => acc + item.quantity, 0);
 
-      if (otherItemsQty + newQty > product.stock) {
+      if (otherItemsQty + newQty > effectiveStock) {
         alert('재고가 부족합니다.');
         return prev;
       }
@@ -153,7 +168,13 @@ export function POSSeller() {
       // Final Stock Check
       const stockCheckMap: Record<string, number> = {};
       for (const item of cart) {
-        stockCheckMap[item.id] = (stockCheckMap[item.id] || 0) + item.quantity;
+        if (item.isSet && item.components) {
+          item.components.forEach((comp: any) => {
+            stockCheckMap[comp.id] = (stockCheckMap[comp.id] || 0) + (comp.quantity * item.quantity);
+          });
+        } else {
+          stockCheckMap[item.id] = (stockCheckMap[item.id] || 0) + item.quantity;
+        }
       }
       
       for (const [productId, totalQty] of Object.entries(stockCheckMap)) {
@@ -185,9 +206,17 @@ export function POSSeller() {
 
       // 2. Update Inventory
       for (const item of cart) {
-        await updateDoc(doc(db, `stores/${store.id}/products`, item.id), {
-          stock: increment(-item.quantity)
-        });
+        if (item.isSet && item.components) {
+          for (const comp of item.components) {
+            await updateDoc(doc(db, `stores/${store.id}/products`, comp.id), {
+              stock: increment(-(comp.quantity * item.quantity))
+            });
+          }
+        } else {
+          await updateDoc(doc(db, `stores/${store.id}/products`, item.id), {
+            stock: increment(-item.quantity)
+          });
+        }
       }
 
       setCart([]);
@@ -213,7 +242,13 @@ export function POSSeller() {
         // Final Stock Check
         const stockCheckMap: Record<string, number> = {};
         for (const item of cart) {
-          stockCheckMap[item.id] = (stockCheckMap[item.id] || 0) + item.quantity;
+          if (item.isSet && item.components) {
+            item.components.forEach((comp: any) => {
+              stockCheckMap[comp.id] = (stockCheckMap[comp.id] || 0) + (comp.quantity * item.quantity);
+            });
+          } else {
+            stockCheckMap[item.id] = (stockCheckMap[item.id] || 0) + item.quantity;
+          }
         }
         
         for (const [productId, totalQty] of Object.entries(stockCheckMap)) {
@@ -246,18 +281,37 @@ export function POSSeller() {
         });
 
         for (const item of cart) {
-          await updateDoc(doc(db, `stores/${store.id}/products`, item.id), {
-            stock: increment(-item.quantity)
-          });
+          if (item.isSet && item.components) {
+            for (const comp of item.components) {
+              await updateDoc(doc(db, `stores/${store.id}/products`, comp.id), {
+                stock: increment(-(comp.quantity * item.quantity))
+              });
+            }
+          } else {
+            await updateDoc(doc(db, `stores/${store.id}/products`, item.id), {
+              stock: increment(-item.quantity)
+            });
+          }
         }
         setCart([]);
         setIsDirectCheckout(false);
       } else {
         // Final Stock Check for Kiosk Sale
+        const stockCheckMap: Record<string, number> = {};
         for (const item of selectedSale.items) {
-          const p = products.find(prod => prod.id === item.id);
-          if (p && p.stock < item.quantity) {
-            alert(`${item.name}의 재고가 부족합니다. (현재 재고: ${p.stock})\n주문을 거절하거나 재고를 확인해주세요.`);
+          if (item.isSet && item.components) {
+            item.components.forEach((comp: any) => {
+              stockCheckMap[comp.id] = (stockCheckMap[comp.id] || 0) + (comp.quantity * item.quantity);
+            });
+          } else {
+            stockCheckMap[item.id] = (stockCheckMap[item.id] || 0) + item.quantity;
+          }
+        }
+
+        for (const [productId, totalQty] of Object.entries(stockCheckMap)) {
+          const p = products.find(prod => prod.id === productId);
+          if (p && p.stock < totalQty) {
+            alert(`${p.name}의 재고가 부족합니다. (현재 재고: ${p.stock})\n주문을 거절하거나 재고를 확인해주세요.`);
             setIsProcessing(false);
             return;
           }
@@ -272,9 +326,17 @@ export function POSSeller() {
         });
 
         for (const item of selectedSale.items) {
-          await updateDoc(doc(db, `stores/${store.id}/products`, item.id), {
-            stock: increment(-item.quantity)
-          });
+          if (item.isSet && item.components) {
+            for (const comp of item.components) {
+              await updateDoc(doc(db, `stores/${store.id}/products`, comp.id), {
+                stock: increment(-(comp.quantity * item.quantity))
+              });
+            }
+          } else {
+            await updateDoc(doc(db, `stores/${store.id}/products`, item.id), {
+              stock: increment(-item.quantity)
+            });
+          }
         }
       }
 
@@ -390,25 +452,25 @@ export function POSSeller() {
                       e.preventDefault();
                       addToCart(product, true);
                     }}
-                    disabled={product.stock <= 0}
+                    disabled={getEffectiveStock(product) <= 0}
                     className={cn(
                       "flex flex-col text-left bg-white p-4 rounded-2xl border border-slate-200 hover:border-indigo-500 hover:shadow-md transition-all group relative overflow-hidden active:scale-95",
-                      product.stock <= 0 && "opacity-60 grayscale cursor-not-allowed"
+                      getEffectiveStock(product) <= 0 && "opacity-60 grayscale cursor-not-allowed"
                     )}
                   >
                     <div className="flex justify-between items-start mb-2">
                       <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">{product.category || '전체'}</span>
                       <span className={cn(
                         "text-[10px] font-bold px-1.5 py-0.5 rounded",
-                        product.stock <= (store?.lowStockThreshold || 5) ? "bg-red-50 text-red-600" : "bg-slate-100 text-slate-500"
+                        getEffectiveStock(product) <= (store?.lowStockThreshold || 5) ? "bg-red-50 text-red-600" : "bg-slate-100 text-slate-500"
                       )}>
-                        재고: {product.stock}
+                        재고: {getEffectiveStock(product)}
                       </span>
                     </div>
                     <h4 className="font-bold text-slate-900 mb-1 line-clamp-2">{product.name}</h4>
                     <p className="text-indigo-600 font-display font-bold mt-auto">{formatCurrency(product.price)}</p>
                     
-                    {product.stock <= 0 && (
+                    {getEffectiveStock(product) <= 0 && (
                       <div className="absolute inset-0 bg-slate-900/10 flex items-center justify-center backdrop-blur-[1px]">
                         <span className="bg-slate-900 text-white text-xs font-bold px-3 py-1 rounded-full">품절</span>
                       </div>
