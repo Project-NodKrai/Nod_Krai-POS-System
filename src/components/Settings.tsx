@@ -77,20 +77,42 @@ export function Settings() {
     const wb = XLSX.utils.book_new();
     
     const salesSnap = await getDocs(collection(db, `stores/${store.id}/sales`));
-    const salesData = salesSnap.docs.map(doc => {
-      const s = doc.data();
-      return {
-        '주문 ID': doc.id,
-        '일시': s.timestamp?.toDate().toLocaleString(),
-        '총액': s.totalAmount,
-        '받은 금액': s.receivedAmount || 0,
-        '거스름돈': s.changeAmount || 0,
-        '결제수단': s.paymentMethod,
-        '상태': s.status,
-      };
+    const sales = salesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+    // 1. 판매 요약 (주문별)
+    const summaryData = sales.map((s: any) => ({
+      '주문 ID': s.id,
+      '일시': s.timestamp?.toDate().toLocaleString(),
+      '주문 방식': s.type === 'seller' ? '판매자 POS' : '키오스크',
+      '결제수단': s.paymentMethod === 'card' ? '카드' : s.paymentMethod === 'cash' ? '현금' : '계좌이체',
+      '품목 요약': s.items?.map((i: any) => `${i.name}(${i.quantity})`).join(', '),
+      '총 품목 수': s.items?.reduce((acc: number, i: any) => acc + i.quantity, 0) || 0,
+      '할인 금액': s.discountAmount || 0,
+      '총 결제 금액': s.totalAmount,
+      '받은 금액': s.receivedAmount || 0,
+      '거스름돈': s.changeAmount || 0,
+      '상태': s.status === 'completed' ? '완료' : s.status === 'pending' ? '대기' : '취소',
+    }));
+    const summaryWs = XLSX.utils.json_to_sheet(summaryData);
+    XLSX.utils.book_append_sheet(wb, summaryWs, "판매 요약");
+
+    // 2. 판매 상세 (품목별)
+    const detailData: any[] = [];
+    sales.forEach((sale: any) => {
+      sale.items?.forEach((item: any) => {
+        detailData.push({
+          '주문 ID': sale.id,
+          '판매 일시': sale.timestamp?.toDate ? sale.timestamp.toDate().toLocaleString() : '-',
+          '주문 방식': sale.type === 'seller' ? '판매자 POS' : '키오스크',
+          '상품명': item.name,
+          '단가': item.price,
+          '수량': item.quantity,
+          '소계': item.price * item.quantity
+        });
+      });
     });
-    const salesWs = XLSX.utils.json_to_sheet(salesData);
-    XLSX.utils.book_append_sheet(wb, salesWs, "판매 기록");
+    const detailWs = XLSX.utils.json_to_sheet(detailData);
+    XLSX.utils.book_append_sheet(wb, detailWs, "판매 상세");
 
     const productsSnap = await getDocs(collection(db, `stores/${store.id}/products`));
     const inventoryData = productsSnap.docs.map(doc => {
@@ -98,12 +120,14 @@ export function Settings() {
       return {
         '상품명': p.name,
         '카테고리': p.category,
+        '원가': p.cost || 0,
         '판매가': p.price,
         '현재 재고': p.stock,
+        '안전 재고': p.minStock || 5
       };
     });
     const inventoryWs = XLSX.utils.json_to_sheet(inventoryData);
-    XLSX.utils.book_append_sheet(wb, inventoryWs, "재고 현황");
+    XLSX.utils.book_append_sheet(wb, inventoryWs, "제품 현황");
 
     XLSX.writeFile(wb, `${store.name}_전체데이터_${new Date().toLocaleDateString()}.xlsx`);
   };

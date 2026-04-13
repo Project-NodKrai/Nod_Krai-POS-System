@@ -178,17 +178,52 @@ export function Inventory() {
     setIsExporting(true);
     try {
       const wb = XLSX.utils.book_new();
-      const exportData = sales.map(sale => ({
+      
+      // 1. 판매 요약 (주문별)
+      const summaryData = sales.map(sale => ({
         '주문 ID': sale.id,
         '판매 일시': sale.timestamp?.toDate ? format(sale.timestamp.toDate(), 'yyyy-MM-dd HH:mm:ss') : '-',
-        '품목': sale.items?.map((i: any) => `${i.name}(${i.quantity})`).join(', '),
+        '주문 방식': sale.type === 'seller' ? '판매자 POS' : '키오스크',
+        '결제 수단': sale.paymentMethod === 'cash' ? '현금' : sale.paymentMethod === 'card' ? '카드' : '계좌이체',
+        '품목 요약': sale.items?.map((i: any) => `${i.name}(${i.quantity})`).join(', '),
+        '총 품목 수': sale.items?.reduce((acc: number, i: any) => acc + i.quantity, 0) || 0,
+        '할인 금액': sale.discountAmount || 0,
         '총 결제 금액': sale.totalAmount,
-        '결제 수단': sale.paymentMethod === 'cash' ? '현금' : sale.paymentMethod === 'card' ? '카드' : '계좌이체'
       }));
-      
-      const ws = XLSX.utils.json_to_sheet(exportData);
-      XLSX.utils.book_append_sheet(wb, ws, "최근 판매 내역");
-      XLSX.writeFile(wb, `${store.name}_판매내역_${format(new Date(), 'yyyyMMdd')}.xlsx`);
+      const summaryWs = XLSX.utils.json_to_sheet(summaryData);
+      XLSX.utils.book_append_sheet(wb, summaryWs, "판매 요약");
+
+      // 2. 판매 상세 (품목별)
+      const detailData: any[] = [];
+      sales.forEach(sale => {
+        sale.items?.forEach((item: any) => {
+          detailData.push({
+            '주문 ID': sale.id,
+            '판매 일시': sale.timestamp?.toDate ? format(sale.timestamp.toDate(), 'yyyy-MM-dd HH:mm:ss') : '-',
+            '주문 방식': sale.type === 'seller' ? '판매자 POS' : '키오스크',
+            '상품명': item.name,
+            '단가': item.price,
+            '수량': item.quantity,
+            '소계': item.price * item.quantity
+          });
+        });
+      });
+      const detailWs = XLSX.utils.json_to_sheet(detailData);
+      XLSX.utils.book_append_sheet(wb, detailWs, "판매 상세");
+
+      // 3. 제품 현황
+      const inventoryData = products.map(p => ({
+        '상품명': p.name,
+        '카테고리': p.category,
+        '원가': p.cost || 0,
+        '판매가': p.price,
+        '현재 재고': p.stock,
+        '안전 재고': p.minStock || 5
+      }));
+      const inventoryWs = XLSX.utils.json_to_sheet(inventoryData);
+      XLSX.utils.book_append_sheet(wb, inventoryWs, "제품 현황");
+
+      XLSX.writeFile(wb, `${store.name}_종합리포트_${format(new Date(), 'yyyyMMdd')}.xlsx`);
     } catch (error) {
       console.error('Excel export failed', error);
       alert('엑셀 파일 생성 중 오류가 발생했습니다.');
@@ -206,8 +241,8 @@ export function Inventory() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-display font-bold text-slate-900">재고 및 판매 관리</h1>
-          <p className="text-slate-500">상품 재고와 최근 판매 내역을 확인하세요.</p>
+          <h1 className="text-3xl font-display font-bold text-slate-900">제품 관리</h1>
+          <p className="text-slate-500">제품 재고와 최근 판매 내역을 확인하세요.</p>
         </div>
         <div className="flex gap-3">
           {activeSubTab === 'inventory' ? (

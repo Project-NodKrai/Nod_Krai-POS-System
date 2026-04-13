@@ -46,33 +46,54 @@ export function Dashboard() {
 
     const wb = XLSX.utils.book_new();
 
-    // Sales Sheet
-    const salesData = sales.map(s => ({
+    // 1. 판매 요약 (주문별)
+    const summaryData = sales.map(s => ({
       '주문 ID': s.id,
       '일시': s.timestamp?.toDate().toLocaleString(),
-      '총액': s.totalAmount,
+      '주문 방식': s.type === 'seller' ? '판매자 POS' : '키오스크',
+      '결제수단': s.paymentMethod === 'card' ? '카드' : s.paymentMethod === 'cash' ? '현금' : '계좌이체',
+      '품목 요약': s.items?.map((i: any) => `${i.name}(${i.quantity})`).join(', '),
+      '총 품목 수': s.items?.reduce((acc: number, i: any) => acc + i.quantity, 0) || 0,
+      '할인 금액': s.discountAmount || 0,
+      '총 결제 금액': s.totalAmount,
       '받은 금액': s.receivedAmount || 0,
       '거스름돈': s.changeAmount || 0,
-      '결제수단': s.paymentMethod === 'card' ? '카드' : s.paymentMethod === 'cash' ? '현금' : '계좌이체',
       '상태': s.status === 'completed' ? '완료' : s.status === 'pending' ? '대기' : '취소',
-      '상품수': s.items?.length || 0
     }));
-    const salesWs = XLSX.utils.json_to_sheet(salesData);
-    XLSX.utils.book_append_sheet(wb, salesWs, "판매 기록");
+    const summaryWs = XLSX.utils.json_to_sheet(summaryData);
+    XLSX.utils.book_append_sheet(wb, summaryWs, "판매 요약");
 
-    // Inventory Sheet
+    // 2. 판매 상세 (품목별)
+    const detailData: any[] = [];
+    sales.forEach(sale => {
+      sale.items?.forEach((item: any) => {
+        detailData.push({
+          '주문 ID': sale.id,
+          '판매 일시': sale.timestamp?.toDate ? sale.timestamp.toDate().toLocaleString() : '-',
+          '주문 방식': sale.type === 'seller' ? '판매자 POS' : '키오스크',
+          '상품명': item.name,
+          '단가': item.price,
+          '수량': item.quantity,
+          '소계': item.price * item.quantity
+        });
+      });
+    });
+    const detailWs = XLSX.utils.json_to_sheet(detailData);
+    XLSX.utils.book_append_sheet(wb, detailWs, "판매 상세");
+
+    // 3. 제품 현황
     const inventoryData = products.map(p => ({
-      '상품 ID': p.id,
-      '카테고리': p.category,
       '상품명': p.name,
+      '카테고리': p.category,
+      '원가': p.cost || 0,
       '판매가': p.price,
       '현재 재고': p.stock,
-      '안전 재고': p.minStock
+      '안전 재고': p.minStock || 5
     }));
     const inventoryWs = XLSX.utils.json_to_sheet(inventoryData);
-    XLSX.utils.book_append_sheet(wb, inventoryWs, "재고 현황");
+    XLSX.utils.book_append_sheet(wb, inventoryWs, "제품 현황");
 
-    XLSX.writeFile(wb, `${store.name}_리포트_${new Date().toLocaleDateString()}.xlsx`);
+    XLSX.writeFile(wb, `${store.name}_종합리포트_${new Date().toLocaleDateString()}.xlsx`);
   };
 
   const completedSales = sales.filter(s => s.status === 'completed');
