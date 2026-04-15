@@ -9,9 +9,10 @@ import {
 import { 
   TrendingUp, PieChart as PieChartIcon, BarChart3, Clock, Calendar, 
   Users, AlertCircle, ArrowUpRight, ArrowDownRight, Package, ShoppingBag,
-  RefreshCcw, Filter, Heart, Percent
+  RefreshCcw, Filter, Heart, Percent, Download
 } from 'lucide-react';
 import { formatCurrency, cn } from '../lib/utils';
+import * as XLSX from 'xlsx';
 
 const COLORS = ['#6366f1', '#8b5cf6', '#ec4899', '#f43f5e', '#f59e0b', '#10b981', '#06b6d4', '#3b82f6'];
 
@@ -270,6 +271,72 @@ export function Analytics() {
     return { totalRevenue, totalProfit, averageMargin, productMargins };
   }, [completedSales, products]);
 
+  const handleExport = () => {
+    const wb = XLSX.utils.book_new();
+
+    // 1. 시간대별 수익
+    const hourlyWS = XLSX.utils.json_to_sheet(hourlyData.map(d => ({
+      '시간': d.hour,
+      '매출액': d.revenue,
+      '순이익': d.profit,
+      '결제건수': d.count
+    })));
+    XLSX.utils.book_append_sheet(wb, hourlyWS, "시간대별 수익");
+
+    // 2. 카테고리별 판매
+    const categoryWS = XLSX.utils.json_to_sheet(categoryData.map(d => ({
+      '카테고리': d.name,
+      '매출액': d.revenue,
+      '순이익': d.profit,
+      '판매량': d.volume
+    })));
+    XLSX.utils.book_append_sheet(wb, categoryWS, "카테고리별 판매");
+
+    // 3. 상품 진단 (ABC)
+    const abcWS = XLSX.utils.json_to_sheet(abcData.map(d => ({
+      '상품명': d.name,
+      '매출액': d.revenue,
+      '순이익': d.profit,
+      '판매량': d.volume,
+      '등급': d.grade
+    })));
+    XLSX.utils.book_append_sheet(wb, abcWS, "상품 진단");
+
+    // 4. 요일별 패턴
+    const weeklyWS = XLSX.utils.json_to_sheet(weeklyData.map(d => ({
+      '요일': d.day,
+      '매출액': d.revenue
+    })));
+    XLSX.utils.book_append_sheet(wb, weeklyWS, "요일별 패턴");
+
+    // 5. 객단가 추이
+    const atvWS = XLSX.utils.json_to_sheet(atvTrend.map(d => ({
+      '날짜': d.date,
+      '객단가': d.atv
+    })));
+    XLSX.utils.book_append_sheet(wb, atvWS, "객단가 추이");
+
+    // 6. 취소/환불 분석
+    const cancelWS = XLSX.utils.json_to_sheet(cancellationData.map(d => ({
+      '상품명': d.name,
+      '취소수량': d.count,
+      '취소금액': d.amount
+    })));
+    XLSX.utils.book_append_sheet(wb, cancelWS, "취소환불 분석");
+
+    // 7. 이익률 분석
+    const profitWS = XLSX.utils.json_to_sheet(profitStats.productMargins.map(d => ({
+      '상품명': d.name,
+      '판매가': d.price,
+      '원가': d.cost,
+      '이익률(%)': d.margin.toFixed(2)
+    })));
+    XLSX.utils.book_append_sheet(wb, profitWS, "이익률 분석");
+
+    const fileName = `분석통계_${new Date().toISOString().split('T')[0]}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -286,6 +353,13 @@ export function Analytics() {
           <p className="text-slate-500">실시간 판매 데이터를 기반으로 최적화된 상품 전략과 운영 인사이트를 제공합니다.</p>
         </div>
         <div className="flex items-center gap-4">
+          <button
+            onClick={handleExport}
+            className="flex items-center gap-2 px-4 py-2 bg-white text-indigo-600 border border-indigo-200 rounded-xl font-bold hover:bg-indigo-50 transition-all shadow-sm"
+          >
+            <Download className="w-4 h-4" />
+            엑셀 내보내기
+          </button>
           <div className="flex bg-white p-1 rounded-xl border border-slate-200 shadow-sm self-start">
             {(['7d', '30d', 'all'] as const).map(range => (
               <button
