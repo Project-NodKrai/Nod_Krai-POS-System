@@ -236,7 +236,7 @@ export default function App() {
         <Routes>
           <Route path="/kiosk/:subdomain" element={<KioskWrapper />} />
           <Route path="/admin/:subdomain/*" element={<AdminGuard />} />
-          <Route path="/" element={<AppContent />} />
+          <Route path="/*" element={<AppContent />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </HashRouter>

@@ -14,9 +14,32 @@
         "allowCash": { "type": "boolean" },
         "hideOutOfStock": { "type": "boolean" },
         "lowStockThreshold": { "type": "number" },
+        "isOpen": { "type": "boolean", "description": "Whether the store is currently open for business" },
+        "currentSessionId": { "type": "string", "description": "ID of the current active business session" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["ownerId", "name", "subdomain"]
+    },
+    "BusinessSession": {
+      "title": "BusinessSession",
+      "description": "A single business operation period from open to close.",
+      "type": "object",
+      "properties": {
+        "storeId": { "type": "string" },
+        "startTime": { "type": "string", "format": "date-time" },
+        "endTime": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["open", "closed"] },
+        "salesSummary": {
+          "type": "object",
+          "properties": {
+            "cash": { "type": "number" },
+            "card": { "type": "number" },
+            "transfer": { "type": "number" },
+            "total": { "type": "number" }
+          }
+        }
+      },
+      "required": ["storeId", "startTime", "status"]
     },
     "Product": {
       "title": "Product",
@@ -77,6 +100,10 @@
     "/stores/{storeId}/sales/{saleId}": {
       "schema": "Sale",
       "description": "Sales records for a specific store."
+    },
+    "/stores/{storeId}/businessSessions/{sessionId}": {
+      "schema": "BusinessSession",
+      "description": "Business operation sessions for a specific store."
     }
   }
 }

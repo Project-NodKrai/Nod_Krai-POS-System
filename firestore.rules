@@ -47,6 +47,8 @@ service cloud.firestore {
              (!('allowCash' in data) || data.allowCash is bool) &&
              (!('hideOutOfStock' in data) || data.hideOutOfStock is bool) &&
              (!('lowStockThreshold' in data) || data.lowStockThreshold is number) &&
+             (!('isOpen' in data) || data.isOpen is bool) &&
+             (!('currentSessionId' in data) || data.currentSessionId == null || data.currentSessionId is string) &&
              (!('adminPin' in data) || data.adminPin is string);
     }
 
@@ -71,6 +73,15 @@ service cloud.firestore {
              data.paymentMethod in ['cash', 'card', 'transfer'] &&
              data.status in ['pending', 'completed', 'cancelled'] &&
              data.timestamp is timestamp;
+    }
+
+    function isValidBusinessSession(data) {
+      return data.keys().hasAll(['storeId', 'startTime', 'status']) &&
+             data.storeId is string &&
+             data.startTime is timestamp &&
+             data.status in ['open', 'closed'] &&
+             (!('endTime' in data) || data.endTime is timestamp) &&
+             (!('salesSummary' in data) || data.salesSummary is map);
     }
 
     // ===============================================================
@@ -99,6 +110,12 @@ service cloud.firestore {
         allow read: if isAuthenticated(); // Only authenticated users (staff/owner) can read sales
         allow create: if true; // Kiosk needs to create sales
         allow update: if isAuthenticated() && (isStoreOwner(storeId) || (resource.data.status == 'pending' && (request.resource.data.status == 'completed' || request.resource.data.status == 'cancelled')));
+        allow delete: if isStoreOwner(storeId);
+      }
+
+      match /businessSessions/{sessionId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isStoreOwner(storeId) && isValidBusinessSession(request.resource.data);
         allow delete: if isStoreOwner(storeId);
       }
     }

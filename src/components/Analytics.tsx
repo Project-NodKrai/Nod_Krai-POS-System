@@ -436,7 +436,7 @@ export function Analytics() {
               <h3 className="font-bold text-slate-900">시간대별 수익</h3>
             </div>
           </div>
-          <div className="h-80 w-full">
+          <div className="w-full h-80">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={hourlyData}>
                 <defs>
@@ -534,7 +534,7 @@ export function Analytics() {
               ))}
             </div>
           </div>
-          <div className="h-96 w-full flex items-center">
+          <div className="w-full h-96 flex items-center">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
@@ -655,7 +655,7 @@ export function Analytics() {
               <h3 className="font-bold text-slate-900">요일별 매출 패턴 분석</h3>
             </div>
           </div>
-          <div className="h-80 w-full">
+          <div className="w-full h-80">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={weeklyData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
@@ -702,7 +702,7 @@ export function Analytics() {
               <h3 className="font-bold text-slate-900">객단가(ATV) 추이</h3>
             </div>
           </div>
-          <div className="h-80 w-full">
+          <div className="w-full h-80">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={atvTrend}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
@@ -728,7 +728,7 @@ export function Analytics() {
               <h3 className="font-bold text-slate-900">취소/환불 분석 (Top 10)</h3>
             </div>
           </div>
-          <div className="h-80 w-full">
+          <div className="w-full h-80">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={cancellationData} layout="vertical">
                 <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />

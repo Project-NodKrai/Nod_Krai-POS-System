@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../AuthContext';
 import { db } from '../firebase';
-import { collection, onSnapshot, addDoc, doc, updateDoc, increment, serverTimestamp } from 'firebase/firestore';
-import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, History, Landmark, X, Calculator, Loader2, CheckCircle2 } from 'lucide-react';
+import { collection, onSnapshot, addDoc, doc, updateDoc, increment, serverTimestamp, query, orderBy, limit, getDocs, where, getDoc, runTransaction } from 'firebase/firestore';
+import { Search, ShoppingCart, Trash2, Plus, Minus, CreditCard, Banknote, History, Landmark, X, Calculator, Loader2, CheckCircle2, Clock, Power, FileText, ChevronRight, ChevronDown, ArrowLeft } from 'lucide-react';
 import { formatCurrency, cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -18,6 +18,13 @@ export function POSSeller() {
   const [activeTab, setActiveTab] = useState<'products' | 'pending'>('products');
   const [isComingSoonOpen, setIsComingSoonOpen] = useState(false);
   
+  // Business Status State
+  const [isBusinessModalOpen, setIsBusinessModalOpen] = useState(false);
+  const [businessTab, setBusinessTab] = useState<'status' | 'history'>('status');
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [selectedSession, setSelectedSession] = useState<any>(null);
+  const [isBusinessProcessing, setIsBusinessProcessing] = useState(false);
+
   // Change Calculator State
   const [isCalculatorOpen, setIsCalculatorOpen] = useState(false);
   const [selectedSale, setSelectedSale] = useState<any>(null);
@@ -39,10 +46,17 @@ export function POSSeller() {
         .sort((a: any, b: any) => b.timestamp?.seconds - a.timestamp?.seconds)
       );
     });
+    const unsubSessions = onSnapshot(
+      query(collection(db, `stores/${store.id}/businessSessions`), orderBy('startTime', 'desc'), limit(50)),
+      (snapshot) => {
+        setSessions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      }
+    );
     return () => {
       unsubProducts();
       unsubCategories();
       unsubSales();
+      unsubSessions();
     };
   }, [store]);
 
@@ -190,6 +204,7 @@ export function POSSeller() {
         // 1. Record Sale
         await addDoc(collection(db, `stores/${store.id}/sales`), {
           storeId: store.id,
+          sessionId: store.currentSessionId || null,
           items: cart.map(item => ({ 
             id: item.id, 
             name: item.isService ? `[서비스] ${item.name}` : item.name, 
@@ -264,6 +279,7 @@ export function POSSeller() {
         // Direct POS Checkout
         await addDoc(collection(db, `stores/${store.id}/sales`), {
           storeId: store.id,
+          sessionId: store.currentSessionId || null,
           items: cart.map(item => ({ 
             id: item.id, 
             name: item.isService ? `[서비스] ${item.name}` : item.name, 
@@ -378,6 +394,115 @@ export function POSSeller() {
     setIsCalculatorOpen(true);
   };
 
+  const handleToggleBusiness = async () => {
+    if (!store || isBusinessProcessing) return;
+    setIsBusinessProcessing(true);
+    try {
+      const storeRef = doc(db, 'stores', store.id);
+      
+      // 1. Get current state outside transaction to decide what to do
+      const storeSnap = await getDoc(storeRef);
+      const currentStoreData = storeSnap.data();
+      if (!currentStoreData) return;
+
+      const isCurrentlyOpen = !!currentStoreData.isOpen;
+
+      if (isCurrentlyOpen) {
+        // End Business Logic
+        const currentSessionId = currentStoreData.currentSessionId;
+        let summary = { cash: 0, card: 0, transfer: 0, total: 0 };
+
+        if (currentSessionId) {
+          const sessionRef = doc(db, `stores/${store.id}/businessSessions`, currentSessionId);
+          const sessionDoc = await getDoc(sessionRef);
+          const startTime = sessionDoc.data()?.startTime;
+
+          if (startTime) {
+            const salesSnap = await getDocs(query(
+              collection(db, `stores/${store.id}/sales`),
+              where('timestamp', '>=', startTime),
+              where('status', '==', 'completed')
+            ));
+
+            salesSnap.docs.forEach(doc => {
+              const data = doc.data();
+              const method = data.paymentMethod as 'cash' | 'card' | 'transfer';
+              if (summary.hasOwnProperty(method)) {
+                summary[method] += data.totalAmount;
+                summary.total += data.totalAmount;
+              }
+            });
+          }
+        }
+
+        // 2. Use transaction for atomic status update
+        await runTransaction(db, async (transaction) => {
+          const sSnap = await transaction.get(storeRef);
+          if (!sSnap.exists() || !sSnap.data().isOpen) return; // Already closed or doesn't exist
+
+          if (currentSessionId) {
+            const sessionRef = doc(db, `stores/${store.id}/businessSessions`, currentSessionId);
+            transaction.update(sessionRef, {
+              endTime: serverTimestamp(),
+              status: 'closed',
+              salesSummary: summary
+            });
+          }
+
+          transaction.update(storeRef, {
+            isOpen: false,
+            currentSessionId: null
+          });
+        });
+      } else {
+        // Start Business Logic
+        await runTransaction(db, async (transaction) => {
+          const sSnap = await transaction.get(storeRef);
+          if (!sSnap.exists() || sSnap.data().isOpen) return; // Already open or doesn't exist
+
+          const sessionRef = doc(collection(db, `stores/${store.id}/businessSessions`));
+          transaction.set(sessionRef, {
+            storeId: store.id,
+            startTime: serverTimestamp(),
+            status: 'open'
+          });
+
+          transaction.update(storeRef, {
+            isOpen: true,
+            currentSessionId: sessionRef.id
+          });
+        });
+      }
+    } catch (error) {
+      console.error('Toggle business failed', error);
+      if (error instanceof Error && error.message.includes('permissions')) {
+        alert('권한이 없습니다. 관리자 계정인지 확인해주세요.');
+      } else {
+        alert('영업 상태 변경 중 오류가 발생했습니다.');
+      }
+    } finally {
+      setIsBusinessProcessing(false);
+    }
+  };
+
+  const formatDuration = (start: any, end: any) => {
+    if (!start) return '-';
+    const startTime = start.toDate().getTime();
+    const endTime = end ? end.toDate().getTime() : new Date().getTime();
+    const diff = Math.floor((endTime - startTime) / 1000);
+    
+    const hours = Math.floor(diff / 3600);
+    const minutes = Math.floor((diff % 3600) / 60);
+    const seconds = diff % 60;
+
+    const parts = [];
+    if (hours > 0) parts.push(`${hours}시간`);
+    if (minutes > 0) parts.push(`${minutes}분`);
+    if (seconds > 0 || parts.length === 0) parts.push(`${seconds}초`);
+    
+    return parts.join(' ');
+  };
+
   const filteredProducts = products.filter(p => 
     (category === '전체' || (p.category || '전체') === category) &&
     p.name.toLowerCase().includes(search.toLowerCase())
@@ -387,38 +512,57 @@ export function POSSeller() {
     <div className="flex h-[calc(100vh-8rem)] gap-6 overflow-hidden">
       {/* Left: Product Selection or Pending List */}
       <div className="flex-1 flex flex-col gap-4 min-w-0">
-        <div className="flex items-center gap-4 bg-white p-1 rounded-xl border border-slate-200 w-fit">
-          <button 
-            onClick={() => setActiveTab('products')}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4 bg-white p-1 rounded-xl border border-slate-200 w-fit">
+            <button 
+              onClick={() => setActiveTab('products')}
+              className={cn(
+                "px-4 py-2 rounded-lg text-sm font-bold transition-all",
+                activeTab === 'products' ? "bg-indigo-600 text-white shadow-md" : "text-slate-500 hover:bg-slate-50"
+              )}
+            >
+              상품 선택
+            </button>
+            <button 
+              onClick={() => setActiveTab('pending')}
+              className={cn(
+                "px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2",
+                activeTab === 'pending' ? "bg-indigo-600 text-white shadow-md" : "text-slate-500 hover:bg-slate-50"
+              )}
+            >
+              결제 대기
+              {pendingSales.length > 0 && (
+                <span className={cn(
+                  "w-5 h-5 rounded-full text-[10px] flex items-center justify-center",
+                  activeTab === 'pending' ? "bg-white text-indigo-600" : "bg-red-500 text-white"
+                )}>
+                  {pendingSales.length}
+                </span>
+              )}
+            </button>
+            <button 
+              onClick={() => setIsComingSoonOpen(true)}
+              className="px-4 py-2 rounded-lg text-sm font-bold text-slate-500 hover:bg-slate-50 transition-all"
+            >
+              선입금
+            </button>
+          </div>
+
+          {/* Business Status Button */}
+          <button
+            onClick={() => setIsBusinessModalOpen(true)}
             className={cn(
-              "px-4 py-2 rounded-lg text-sm font-bold transition-all",
-              activeTab === 'products' ? "bg-indigo-600 text-white shadow-md" : "text-slate-500 hover:bg-slate-50"
+              "flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm transition-all border shadow-sm active:scale-95",
+              store?.isOpen 
+                ? "bg-emerald-50 border-emerald-200 text-emerald-600 hover:bg-emerald-100" 
+                : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"
             )}
           >
-            상품 선택
-          </button>
-          <button 
-            onClick={() => setActiveTab('pending')}
-            className={cn(
-              "px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2",
-              activeTab === 'pending' ? "bg-indigo-600 text-white shadow-md" : "text-slate-500 hover:bg-slate-50"
-            )}
-          >
-            결제 대기
-            {pendingSales.length > 0 && (
-              <span className={cn(
-                "w-5 h-5 rounded-full text-[10px] flex items-center justify-center",
-                activeTab === 'pending' ? "bg-white text-indigo-600" : "bg-red-500 text-white"
-              )}>
-                {pendingSales.length}
-              </span>
-            )}
-          </button>
-          <button 
-            onClick={() => setIsComingSoonOpen(true)}
-            className="px-4 py-2 rounded-lg text-sm font-bold text-slate-500 hover:bg-slate-50 transition-all"
-          >
-            선입금
+            <div className={cn(
+              "w-2 h-2 rounded-full animate-pulse",
+              store?.isOpen ? "bg-emerald-500" : "bg-slate-400"
+            )} />
+            {store?.isOpen ? '영업 중' : '영업 종료'}
           </button>
         </div>
 
@@ -770,6 +914,240 @@ export function POSSeller() {
                 className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
               >
                 확인
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Business Management Modal */}
+      {isBusinessModalOpen && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
+          <div className="bg-white rounded-[32px] shadow-2xl w-full max-w-4xl h-[80vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200">
+            {/* Header */}
+            <div className="bg-slate-900 text-white p-6 flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <button onClick={() => setIsBusinessModalOpen(false)} className="p-2 hover:bg-white/10 rounded-full transition-colors">
+                  <ArrowLeft className="w-6 h-6" />
+                </button>
+                <h2 className="text-xl font-bold">영업 시작/종료</h2>
+              </div>
+            </div>
+
+            <div className="flex-1 flex overflow-hidden">
+              {/* Sidebar */}
+              <div className="w-64 border-r border-slate-100 bg-slate-50/50 p-4 space-y-2">
+                <button
+                  onClick={() => setBusinessTab('status')}
+                  className={cn(
+                    "w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-all",
+                    businessTab === 'status' ? "bg-indigo-50 text-indigo-600 shadow-sm" : "text-slate-500 hover:bg-slate-100"
+                  )}
+                >
+                  <Power className="w-4 h-4" />
+                  영업 시작/종료
+                </button>
+                <button
+                  onClick={() => setBusinessTab('history')}
+                  className={cn(
+                    "w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-all",
+                    businessTab === 'history' ? "bg-indigo-50 text-indigo-600 shadow-sm" : "text-slate-500 hover:bg-slate-100"
+                  )}
+                >
+                  <History className="w-4 h-4" />
+                  영업 내역
+                </button>
+                <div className="pt-4 px-4">
+                  <button className="w-full flex items-center justify-between text-slate-400 text-xs font-bold uppercase tracking-widest hover:text-slate-600 transition-colors">
+                    현금 관리 설정
+                    <ChevronDown className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto p-8">
+                {businessTab === 'status' ? (
+                  <div className="max-w-xl mx-auto space-y-8">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-4">
+                        <div className={cn(
+                          "w-12 h-12 rounded-2xl flex items-center justify-center",
+                          store?.isOpen ? "bg-emerald-100 text-emerald-600" : "bg-slate-100 text-slate-400"
+                        )}>
+                          <Power className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <h3 className="text-2xl font-bold text-slate-900">
+                            {store?.isOpen ? '영업 중' : '영업 종료'}
+                          </h3>
+                          <p className="text-slate-500 text-sm">{new Date().toLocaleTimeString()}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-50 rounded-3xl p-8 border border-slate-100 space-y-6">
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-500 font-bold">시작</span>
+                        <span className="text-slate-900 font-display font-bold">
+                          {store?.isOpen && store.currentSessionId 
+                            ? sessions.find(s => s.id === store.currentSessionId)?.startTime?.toDate().toLocaleTimeString() + ' 기준'
+                            : '-'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-500 font-bold">종료</span>
+                        <span className="text-slate-900 font-display font-bold">-</span>
+                      </div>
+                    </div>
+
+                    <div className="pt-12 flex justify-center">
+                      <button
+                        onClick={handleToggleBusiness}
+                        disabled={isBusinessProcessing}
+                        className={cn(
+                          "px-12 py-5 rounded-2xl font-bold text-xl transition-all shadow-xl active:scale-95 flex items-center gap-3",
+                          store?.isOpen 
+                            ? "bg-slate-900 text-white hover:bg-slate-800 shadow-slate-200" 
+                            : "bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-200"
+                        )}
+                      >
+                        {isBusinessProcessing ? <Loader2 className="w-6 h-6 animate-spin" /> : <Power className="w-6 h-6" />}
+                        {store?.isOpen ? '영업 종료' : '영업 시작'}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    <h3 className="text-xl font-bold text-slate-900">영업 내역</h3>
+                    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200">
+                            <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-widest">No</th>
+                            <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-widest">시작 시간</th>
+                            <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-widest">종료 시간</th>
+                            <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-widest">영업 시간</th>
+                            <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-widest">매출 리포트</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {sessions.map((session, idx) => (
+                            <tr key={session.id} className="hover:bg-slate-50 transition-colors">
+                              <td className="px-6 py-4 text-sm text-slate-500">{sessions.length - idx}</td>
+                              <td className="px-6 py-4 text-sm font-medium text-slate-900">
+                                {session.startTime?.toDate().toLocaleTimeString()}
+                              </td>
+                              <td className="px-6 py-4 text-sm">
+                                {session.status === 'open' ? (
+                                  <span className="text-emerald-600 font-bold">영업중</span>
+                                ) : (
+                                  <span className="text-slate-500">{session.endTime?.toDate().toLocaleTimeString()}</span>
+                                )}
+                              </td>
+                              <td className="px-6 py-4 text-sm text-slate-500">
+                                {formatDuration(session.startTime, session.endTime)}
+                              </td>
+                              <td className="px-6 py-4 text-sm">
+                                {session.status === 'closed' && (
+                                  <button 
+                                    onClick={() => setSelectedSession(session)}
+                                    className="text-indigo-600 font-bold hover:underline"
+                                  >
+                                    상세보기
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Session Detail Modal */}
+      {selectedSession && (
+        <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
+          <div className="bg-white rounded-[32px] shadow-2xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-8 border-b border-slate-100 flex justify-between items-center">
+              <div>
+                <h2 className="text-2xl font-bold text-slate-900">매출 리포트</h2>
+                <p className="text-slate-500 text-sm">
+                  {selectedSession.startTime?.toDate().toLocaleDateString()} 영업 내역
+                </p>
+              </div>
+              <button onClick={() => setSelectedSession(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+                <X className="w-6 h-6 text-slate-400" />
+              </button>
+            </div>
+
+            <div className="p-8 space-y-8">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">영업 시간</p>
+                  <p className="font-bold text-slate-900">{formatDuration(selectedSession.startTime, selectedSession.endTime)}</p>
+                </div>
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">총 매출</p>
+                  <p className="font-bold text-indigo-600">{formatCurrency(selectedSession.salesSummary?.total || 0)}</p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-slate-500">시작 시각</span>
+                  <span className="font-medium text-slate-900">{selectedSession.startTime?.toDate().toLocaleTimeString()}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-slate-500">종료 시각</span>
+                  <span className="font-medium text-slate-900">{selectedSession.endTime?.toDate().toLocaleTimeString()}</span>
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-slate-100 space-y-4">
+                <h4 className="text-sm font-bold text-slate-900">결제 수단별 실매출</h4>
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center p-4 bg-emerald-50 rounded-xl border border-emerald-100">
+                    <div className="flex items-center gap-3">
+                      <Banknote className="w-5 h-5 text-emerald-600" />
+                      <span className="text-sm font-bold text-emerald-900">현금</span>
+                    </div>
+                    <span className="font-display font-bold text-emerald-600">
+                      {formatCurrency(selectedSession.salesSummary?.cash || 0)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center p-4 bg-blue-50 rounded-xl border border-blue-100">
+                    <div className="flex items-center gap-3">
+                      <CreditCard className="w-5 h-5 text-blue-600" />
+                      <span className="text-sm font-bold text-blue-900">카드</span>
+                    </div>
+                    <span className="font-display font-bold text-blue-600">
+                      {formatCurrency(selectedSession.salesSummary?.card || 0)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center p-4 bg-indigo-50 rounded-xl border border-indigo-100">
+                    <div className="flex items-center gap-3">
+                      <Landmark className="w-5 h-5 text-indigo-600" />
+                      <span className="text-sm font-bold text-indigo-900">계좌이체</span>
+                    </div>
+                    <span className="font-display font-bold text-indigo-600">
+                      {formatCurrency(selectedSession.salesSummary?.transfer || 0)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <button 
+                onClick={() => setSelectedSession(null)}
+                className="w-full py-4 bg-slate-900 text-white rounded-2xl font-bold hover:bg-slate-800 transition-all"
+              >
+                닫기
               </button>
             </div>
           </div>

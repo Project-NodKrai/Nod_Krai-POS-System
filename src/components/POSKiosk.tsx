@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../AuthContext';
 import { db } from '../firebase';
 import { collection, onSnapshot, addDoc, doc, updateDoc, increment, serverTimestamp } from 'firebase/firestore';
-import { ShoppingCart, ArrowLeft, CheckCircle2, CreditCard, Plus, Minus, Banknote, Landmark, Loader2, QrCode, Shield, Settings } from 'lucide-react';
+import { ShoppingCart, ArrowLeft, CheckCircle2, CreditCard, Plus, Minus, Banknote, Landmark, Loader2, QrCode, Shield, Settings, Power } from 'lucide-react';
 import { formatCurrency, cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -139,6 +139,109 @@ export function POSKiosk({ onExit, storeOverride }: { onExit: () => void, storeO
   const handlePinSubmit = (e: React.FormEvent) => {
     e.preventDefault();
   };
+
+  if (!store?.isOpen) {
+    return (
+      <div className="fixed inset-0 bg-slate-50 z-[200] flex flex-col items-center justify-center p-8 text-center">
+        <div className="w-24 h-24 bg-slate-200 text-slate-400 rounded-full flex items-center justify-center mb-8">
+          <Power className="w-12 h-12" />
+        </div>
+        <h1 className="text-4xl font-display font-bold text-slate-900 mb-4">현재 영업 종료 상태입니다</h1>
+        <p className="text-xl text-slate-500 mb-12">
+          영업 시간에 다시 방문해 주세요.<br/>감사합니다.
+        </p>
+        <button 
+          onClick={() => {
+            setPinInput('');
+            setIsAdminModalOpen(true);
+          }}
+          className="px-8 py-4 bg-white border border-slate-200 text-slate-400 font-bold rounded-2xl hover:bg-slate-100 transition-all active:scale-95"
+        >
+          관리자 인증
+        </button>
+
+        {/* Admin PIN Modal (copied from below for access when closed) */}
+        {isAdminModalOpen && (
+          <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm">
+            <div className="bg-white rounded-[32px] shadow-2xl w-full max-w-sm overflow-hidden p-8 text-center">
+              <div className="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-6">
+                <Shield className="w-8 h-8" />
+              </div>
+              <h2 className="text-2xl font-bold text-slate-900 mb-2">관리자 인증</h2>
+              <p className="text-slate-500 mb-8 text-sm">판매자 모드로 돌아가려면<br/>4자리 PIN 번호를 입력하세요.</p>
+              
+              <form onSubmit={handlePinSubmit} className="space-y-6">
+                <div className="flex justify-center gap-3">
+                  {[0, 1, 2, 3].map((i) => (
+                    <div 
+                      key={i}
+                      className={cn(
+                        "w-12 h-16 border-2 rounded-2xl flex items-center justify-center text-2xl font-bold transition-all",
+                        pinInput.length > i ? "border-indigo-600 bg-indigo-50 text-indigo-600" : "border-slate-200 bg-slate-50",
+                        pinError && "border-red-500 bg-red-50 text-red-600 animate-shake"
+                      )}
+                    >
+                      {pinInput.length > i ? '●' : ''}
+                    </div>
+                  ))}
+                </div>
+                
+                <input 
+                  type="password"
+                  maxLength={4}
+                  autoFocus
+                  value={pinInput}
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/[^0-9]/g, '');
+                    if (val.length <= 4) setPinInput(val);
+                  }}
+                  className="absolute opacity-0 pointer-events-none"
+                />
+
+                <div className="grid grid-cols-3 gap-3">
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(num => (
+                    <button
+                      key={num}
+                      type="button"
+                      onClick={() => {
+                        if (pinInput.length < 4) setPinInput(prev => prev + num);
+                      }}
+                      className="h-14 bg-slate-50 rounded-xl text-xl font-bold hover:bg-slate-100 active:scale-95 transition-all"
+                    >
+                      {num}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setIsAdminModalOpen(false)}
+                    className="h-14 text-slate-400 font-bold hover:text-slate-600"
+                  >
+                    취소
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (pinInput.length < 4) setPinInput(prev => prev + '0');
+                    }}
+                    className="h-14 bg-slate-50 rounded-xl text-xl font-bold hover:bg-slate-100 active:scale-95 transition-all"
+                  >
+                    0
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPinInput(prev => prev.slice(0, -1))}
+                    className="h-14 text-slate-400 font-bold hover:text-slate-600"
+                  >
+                    삭제
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const handleCheckout = async (method: 'card' | 'cash' | 'transfer') => {
     if (!store || cart.length === 0) return;
