@@ -145,7 +145,7 @@ export function Dashboard() {
   });
 
   const totalRevenue = todaySales.reduce((acc, s) => acc + s.totalAmount, 0);
-  const goalProgress = dailyGoal > 0 ? Math.min(100, (totalRevenue / dailyGoal) * 100) : 0;
+  const goalProgress = dailyGoal > 0 ? (totalRevenue / dailyGoal) * 100 : 0;
 
   // Prepare chart data (last 7 days)
   const chartData = Array.from({ length: 7 }).map((_, i) => {

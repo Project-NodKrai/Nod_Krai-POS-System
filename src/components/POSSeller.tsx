@@ -16,6 +16,7 @@ export function POSSeller() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [pendingSales, setPendingSales] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'products' | 'pending'>('products');
+  const [isComingSoonOpen, setIsComingSoonOpen] = useState(false);
   
   // Change Calculator State
   const [isCalculatorOpen, setIsCalculatorOpen] = useState(false);
@@ -413,6 +414,12 @@ export function POSSeller() {
               </span>
             )}
           </button>
+          <button 
+            onClick={() => setIsComingSoonOpen(true)}
+            className="px-4 py-2 rounded-lg text-sm font-bold text-slate-500 hover:bg-slate-50 transition-all"
+          >
+            선입금
+          </button>
         </div>
 
         {activeTab === 'products' ? (
@@ -634,6 +641,25 @@ export function POSSeller() {
             </div>
             
             <div className="p-8 space-y-8">
+              {/* Order Items Summary */}
+              <div className="bg-slate-50 rounded-2xl border border-slate-100 overflow-hidden">
+                <div className="px-4 py-2 bg-slate-100/50 border-b border-slate-100 flex justify-between items-center">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">주문 상품 내역</span>
+                  <span className="text-[10px] font-bold text-slate-500">{selectedSale.items.reduce((acc: number, i: any) => acc + i.quantity, 0)}개</span>
+                </div>
+                <div className="p-4 max-h-32 overflow-y-auto space-y-2 scrollbar-thin scrollbar-thumb-slate-200">
+                  {selectedSale.items.map((item: any, idx: number) => (
+                    <div key={idx} className="flex justify-between items-center text-sm">
+                      <div className="flex items-center gap-2">
+                        {item.isService && <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-1 rounded">서비스</span>}
+                        <span className="font-medium text-slate-700">{item.name}</span>
+                      </div>
+                      <span className="font-bold text-slate-900">x{item.quantity}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-8">
                 <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
                   <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">결제 금액</p>
@@ -720,6 +746,31 @@ export function POSSeller() {
                   {selectedSale.paymentMethod === 'cash' ? '결제 완료' : '입금 확인 및 승인'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Coming Soon Modal */}
+      {isComingSoonOpen && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
+          <div className="bg-white rounded-[32px] shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-8 text-center space-y-6">
+              <div className="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-3xl flex items-center justify-center mx-auto">
+                <Loader2 className="w-10 h-10 animate-spin" />
+              </div>
+              <div>
+                <h3 className="text-xl font-bold text-slate-900 mb-2">준비 중인 기능입니다</h3>
+                <p className="text-slate-500 text-sm leading-relaxed">
+                  선입금 관리 기능은 현재 개발 중입니다.<br/>
+                  조금만 더 기다려주세요!
+                </p>
+              </div>
+              <button 
+                onClick={() => setIsComingSoonOpen(false)}
+                className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
+              >
+                확인
+              </button>
             </div>
           </div>
         </div>
