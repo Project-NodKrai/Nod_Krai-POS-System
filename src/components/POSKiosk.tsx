@@ -463,7 +463,15 @@ export function POSKiosk({ onExit, storeOverride }: { onExit: () => void, storeO
   }
 
   return (
-    <div className="flex h-full bg-slate-100 relative overflow-hidden">
+    <div 
+      className="flex h-full bg-slate-100 relative overflow-hidden"
+      style={store?.kioskBackgroundUrl ? {
+        backgroundImage: `url(${store.kioskBackgroundUrl})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat'
+      } : {}}
+    >
       {/* Admin Exit Button (Visible gear icon) */}
       <button 
         onClick={() => {
@@ -477,7 +485,10 @@ export function POSKiosk({ onExit, storeOverride }: { onExit: () => void, storeO
       </button>
 
       {/* Categories Sidebar */}
-      <div className="w-32 bg-white border-r border-slate-200 flex flex-col py-8 overflow-y-auto">
+      <div className={cn(
+        "w-32 border-r border-slate-200 flex flex-col py-8 overflow-y-auto",
+        store?.kioskBackgroundUrl ? "bg-white/80 backdrop-blur-md" : "bg-white"
+      )}>
         {categoryOptions.map(c => (
           <button
             key={c}
@@ -495,7 +506,10 @@ export function POSKiosk({ onExit, storeOverride }: { onExit: () => void, storeO
       </div>
 
       {/* Main Menu Area */}
-      <div className="flex-1 p-8 overflow-y-auto">
+      <div className={cn(
+        "flex-1 p-8 overflow-y-auto",
+        store?.kioskBackgroundUrl ? "bg-slate-900/10" : ""
+      )}>
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6">
           {filteredProducts.map(product => {
             const effectiveStock = getEffectiveStock(product);
@@ -552,7 +566,10 @@ export function POSKiosk({ onExit, storeOverride }: { onExit: () => void, storeO
             initial={{ y: 100 }}
             animate={{ y: 0 }}
             exit={{ y: 100 }}
-            className="absolute bottom-0 left-32 right-0 bg-white border-t border-slate-200 shadow-[0_-10px_20px_rgba(0,0,0,0.05)] p-6 flex items-center gap-8"
+            className={cn(
+              "absolute bottom-0 left-32 right-0 border-t border-slate-200 shadow-[0_-10px_20px_rgba(0,0,0,0.05)] p-6 flex items-center gap-8",
+              store?.kioskBackgroundUrl ? "bg-white/90 backdrop-blur-md" : "bg-white"
+            )}
           >
             <div className="flex-1 flex gap-4 overflow-x-auto pb-2">
               {cart.map(item => (

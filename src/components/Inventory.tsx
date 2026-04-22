@@ -7,6 +7,7 @@ import { formatCurrency, cn } from '../lib/utils';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import * as XLSX from 'xlsx';
+import imageCompression from 'browser-image-compression';
 
 export function Inventory() {
   const { store } = useAuth();
@@ -26,6 +27,7 @@ export function Inventory() {
   const [saleToDelete, setSaleToDelete] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
 
   // Form state
   const [formData, setFormData] = useState<any>({
@@ -111,6 +113,95 @@ export function Inventory() {
     await deleteDoc(doc(db, `stores/${store.id}/categories`, id));
   };
 
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingImage(true);
+    try {
+      const options = {
+        maxSizeMB: 1,
+        maxWidthOrHeight: 1920,
+        useWebWorker: true,
+        fileType: 'image/webp',
+        initialQuality: 0.8,
+      };
+      
+      const compressedBlob = await imageCompression(file, options);
+      const webpFile = new File([compressedBlob], file.name.replace(/\.[^/.]+$/, "") + ".webp", {
+        type: 'image/webp',
+      });
+      
+      const filename = `${Date.now()}_${webpFile.name}`;
+      const uploadUrl = `https://pos-db.columbina.kr/images/product/${encodeURIComponent(filename)}`;
+      
+      const response = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'image/webp'
+        },
+        body: webpFile
+      });
+
+      if (!response.ok) {
+        throw new Error(`Upload failed: ${response.status}`);
+      }
+
+      setFormData((prev: any) => ({ ...prev, imageUrl: uploadUrl }));
+      
+      // 사용자 요청: 저장 버튼을 누르지 않아도 예외적으로 즉시 반영 처리
+      if (store) {
+        if (editingProduct) {
+          // 기존 상품인 경우 바로 해당 상품 문서 업데이트
+          await updateDoc(doc(db, `stores/${store.id}/products`, editingProduct.id), { imageUrl: uploadUrl });
+          // editingProduct 상태도 동기화
+          setEditingProduct((prev: any) => ({ ...prev, imageUrl: uploadUrl }));
+        } else {
+          // 새 상품 작성 중이었을 경우, 이 시점에 임시 문서 (상품) 생성해두어 이탈해도 저장되게 함
+          const newDocRef = await addDoc(collection(db, `stores/${store.id}/products`), {
+            ...formData,
+            name: formData.name || '새 상품 (이미지 임시저장)', // 이름이 비어있을 경우 방지
+            imageUrl: uploadUrl,
+            storeId: store.id,
+            createdAt: serverTimestamp()
+          });
+          // 이후 저장 버튼 누를 때 새 상품이 또 생성되지 않도록 editingProduct로 전환
+          setEditingProduct({ id: newDocRef.id, ...formData, imageUrl: uploadUrl });
+        }
+      }
+    } catch (error: any) {
+      console.error('Image upload error:', error);
+      if (error.message === 'Failed to fetch') {
+        alert('이미지 서버 연결 실패 (Failed to fetch)\n\n서버(pos-db.columbina.kr)가 응답하지 않거나 브라우저의 CORS(교차 출처 리소스 공유) 보안 정책에 의해 차단되었습니다.\n서버에서 외부 도메인의 PUT 요청을 허용하도록 CORS 설정을 확인해주세요.');
+      } else {
+        alert(`이미지 업로드에 실패했습니다: ${error.message}`);
+      }
+    } finally {
+      setIsUploadingImage(false);
+    }
+  };
+
+  const removeImage = async () => {
+    if (formData.imageUrl && formData.imageUrl.startsWith('https://pos-db.columbina.kr/')) {
+      try {
+        await fetch(formData.imageUrl, { method: 'DELETE' });
+      } catch (e) {
+        console.error('Failed to delete old image', e);
+      }
+    }
+    setFormData((prev: any) => ({ ...prev, imageUrl: '' }));
+    
+    // 삭제 시에도 동일하게 즉시 반영
+    if (store && editingProduct) {
+      try {
+        await updateDoc(doc(db, `stores/${store.id}/products`, editingProduct.id), { imageUrl: '' });
+        setEditingProduct((prev: any) => ({ ...prev, imageUrl: '' }));
+      } catch (error) {
+        console.error('Failed to update product document on image removal', error);
+      }
+    }
+  };
+
   const handleDelete = async () => {
     if (!store || !productToDelete) return;
     
@@ -120,6 +211,10 @@ export function Inventory() {
     setProductToDelete(null);
 
     try {
+      const product = products.find(p => p.id === id);
+      if (product?.imageUrl && product.imageUrl.startsWith('https://pos-db.columbina.kr/')) {
+        fetch(product.imageUrl, { method: 'DELETE' }).catch(console.error);
+      }
       await deleteDoc(doc(db, `stores/${store.id}/products`, id));
     } catch (error) {
       console.error('Delete failed', error);
@@ -410,7 +505,11 @@ export function Inventory() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filteredProducts.map((product) => (
-                  <tr key={product.id} className="hover:bg-slate-50 transition-colors group">
+                  <tr 
+                    key={product.id} 
+                    className="hover:bg-slate-50 transition-colors group cursor-pointer"
+                    onClick={() => { setEditingProduct(product); setFormData(product); setIsModalOpen(true); }}
+                  >
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
                         <div className="w-12 h-12 bg-slate-100 rounded-lg flex items-center justify-center overflow-hidden border border-slate-200">
@@ -453,15 +552,15 @@ export function Inventory() {
                       </div>
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex justify-end gap-2 transition-opacity">
                         <button 
-                          onClick={() => { setEditingProduct(product); setFormData(product); setIsModalOpen(true); }}
+                          onClick={(e) => { e.stopPropagation(); setEditingProduct(product); setFormData(product); setIsModalOpen(true); }}
                           className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>
                         <button 
-                          onClick={() => confirmDelete(product.id)}
+                          onClick={(e) => { e.stopPropagation(); confirmDelete(product.id); }}
                           className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -536,7 +635,7 @@ export function Inventory() {
                             setSaleToDelete(sale.id);
                             setIsSaleDeleteModalOpen(true);
                           }}
-                          className="p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                          className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -793,13 +892,57 @@ export function Inventory() {
                   </select>
                 </div>
                 <div className="col-span-2">
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">이미지 URL</label>
-                  <input 
-                    value={formData.imageUrl} 
-                    onChange={e => setFormData({...formData, imageUrl: e.target.value})}
-                    placeholder="https://example.com/image.jpg"
-                    className="w-full px-4 py-2 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500" 
-                  />
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">제품 사진</label>
+                  <div className="flex gap-4 items-start">
+                    {formData.imageUrl ? (
+                      <div className="relative w-24 h-24 rounded-lg overflow-hidden border border-slate-200 shrink-0">
+                        <img src={formData.imageUrl} alt="preview" className="w-full h-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={removeImage}
+                          className="absolute top-1 right-1 p-1 bg-red-500/80 text-white rounded-full hover:bg-red-600 transition-colors backdrop-blur-sm"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="w-24 h-24 rounded-lg border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-400 bg-slate-50 relative shrink-0 transition-all hover:bg-slate-100 hover:border-slate-300">
+                        {isUploadingImage ? (
+                          <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          <>
+                            <ImageIcon className="w-6 h-6 mb-1" />
+                            <span className="text-[10px] font-medium">사진 첨부</span>
+                          </>
+                        )}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleImageUpload}
+                          disabled={isUploadingImage}
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+                        />
+                      </div>
+                    )}
+                    <div className="flex-1">
+                      <input 
+                        value={formData.imageUrl} 
+                        onChange={e => setFormData({...formData, imageUrl: e.target.value})}
+                        placeholder="또는 이미지 URL 직접 입력 (https://...)"
+                        readOnly={formData.imageUrl?.startsWith('https://pos-db.columbina.kr/')}
+                        className={cn(
+                          "w-full px-4 py-2 border rounded-lg text-sm outline-none transition-all",
+                          formData.imageUrl?.startsWith('https://pos-db.columbina.kr/')
+                            ? "bg-slate-100 border-transparent text-slate-500 cursor-not-allowed shadow-inner"
+                            : "bg-white border-slate-200 focus:ring-2 focus:ring-indigo-500"
+                        )}
+                      />
+                      <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
+                        파일을 업로드하면 <span className="font-bold text-indigo-600">WebP 포맷으로 자동 변환</span>되어 서버에 저장됩니다.<br/>
+                        업로드된 이미지는 상품 삭제 시 함께 삭제됩니다.
+                      </p>
+                    </div>
+                  </div>
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase mb-1">판매가 (₩)</label>

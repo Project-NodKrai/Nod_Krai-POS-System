@@ -77,7 +77,7 @@ export function SetupStore() {
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-1">
-              키오스크 주소: https://pos.n-e.kr/#/kiosk/{subdomain || 'my-store'}
+              키오스크 주소: {window.location.origin}/#/kiosk/{subdomain || 'my-store'}
             </p>
           </div>
 

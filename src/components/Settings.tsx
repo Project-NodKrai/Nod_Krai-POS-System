@@ -2,14 +2,17 @@ import React, { useState } from 'react';
 import { useAuth } from '../AuthContext';
 import { db } from '../firebase';
 import { doc, updateDoc, collection, getDocs, deleteDoc, writeBatch } from 'firebase/firestore';
-import { Store, CreditCard, Shield, Database, Save, AlertTriangle, Download, Trash2, QrCode, Banknote, Eye, EyeOff, CheckCircle2 } from 'lucide-react';
+import { Store, CreditCard, Shield, Database, Save, AlertTriangle, Download, Trash2, QrCode, Banknote, Eye, EyeOff, CheckCircle2, X, Image as ImageIcon, Palette, Monitor } from 'lucide-react';
 import { cn } from '../lib/utils';
 import * as XLSX from 'xlsx';
+import imageCompression from 'browser-image-compression';
 
 export function Settings() {
   const { store, user } = useAuth();
   const [isSaving, setIsSaving] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
+  const [isUploadingQr, setIsUploadingQr] = useState(false);
+  const [isUploadingBg, setIsUploadingBg] = useState(false);
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [resetConfirmText, setResetConfirmText] = useState('');
   
@@ -23,6 +26,8 @@ export function Settings() {
     hideOutOfStock: store?.hideOutOfStock ?? false,
     lowStockThreshold: store?.lowStockThreshold ?? 5,
     adminPin: store?.adminPin || '',
+    brandName: store?.brandName || 'NodKrai POS',
+    kioskBackgroundUrl: store?.kioskBackgroundUrl || '',
   });
 
   const handleSave = async () => {
@@ -37,6 +42,152 @@ export function Settings() {
       alert('저장 중 오류가 발생했습니다.');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleQrUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !store) return;
+
+    setIsUploadingQr(true);
+    try {
+      const options = {
+        maxSizeMB: 1,
+        maxWidthOrHeight: 1920,
+        useWebWorker: true,
+        fileType: 'image/webp',
+        initialQuality: 0.8,
+      };
+      
+      const compressedBlob = await imageCompression(file, options);
+      const webpFile = new File([compressedBlob], file.name.replace(/\.[^/.]+$/, "") + ".webp", {
+        type: 'image/webp',
+      });
+      
+      const filename = `${Date.now()}_${webpFile.name}`;
+      const uploadUrl = `https://pos-db.columbina.kr/images/other/${encodeURIComponent(filename)}`;
+      
+      const response = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'image/webp'
+        },
+        body: webpFile
+      });
+
+      if (!response.ok) {
+        throw new Error(`Upload failed: ${response.status}`);
+      }
+
+      setFormData(prev => ({ ...prev, qrCodeUrl: uploadUrl }));
+      
+      // Auto-save the QR URL immediately
+      await updateDoc(doc(db, 'stores', store.id), { qrCodeUrl: uploadUrl });
+      setShowSaveSuccess(true);
+      setTimeout(() => setShowSaveSuccess(false), 3000);
+    } catch (error: any) {
+      console.error('QR upload error:', error);
+      if (error.message === 'Failed to fetch') {
+        alert('이미지 서버 연결 실패 (Failed to fetch)\n\n서버의 CORS 설정을 확인해주세요.');
+      } else {
+        alert(`이미지 업로드에 실패했습니다: ${error.message}`);
+      }
+    } finally {
+      setIsUploadingQr(false);
+    }
+  };
+
+  const handleBgUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !store) return;
+
+    setIsUploadingBg(true);
+    try {
+      const options = {
+        maxSizeMB: 2, // 배경화면은 조금 더 고화질 허용
+        maxWidthOrHeight: 1920,
+        useWebWorker: true,
+        fileType: 'image/webp',
+        initialQuality: 0.9,
+      };
+      
+      const compressedBlob = await imageCompression(file, options);
+      const webpFile = new File([compressedBlob], file.name.replace(/\.[^/.]+$/, "") + ".webp", {
+        type: 'image/webp',
+      });
+      
+      const filename = `${Date.now()}_kiosk_bg_${webpFile.name}`;
+      const uploadUrl = `https://pos-db.columbina.kr/images/UI/${encodeURIComponent(filename)}`;
+      
+      const response = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'image/webp'
+        },
+        body: webpFile
+      });
+
+      if (!response.ok) {
+        throw new Error(`Upload failed: ${response.status}`);
+      }
+
+      setFormData(prev => ({ ...prev, kioskBackgroundUrl: uploadUrl }));
+      
+      // Auto-save immediately
+      await updateDoc(doc(db, 'stores', store.id), { kioskBackgroundUrl: uploadUrl });
+      setShowSaveSuccess(true);
+      setTimeout(() => setShowSaveSuccess(false), 3000);
+    } catch (error: any) {
+      console.error('BG upload error:', error);
+      alert(`이미지 업로드에 실패했습니다: ${error.message}`);
+    } finally {
+      setIsUploadingBg(false);
+    }
+  };
+
+  const removeBgImage = async () => {
+    if (!store) return;
+    
+    if (formData.kioskBackgroundUrl && formData.kioskBackgroundUrl.startsWith('https://pos-db.columbina.kr/')) {
+      try {
+        await fetch(formData.kioskBackgroundUrl, { method: 'DELETE' });
+      } catch (e) {
+        console.error('Failed to delete old BG image', e);
+      }
+    }
+    
+    setFormData(prev => ({ ...prev, kioskBackgroundUrl: '' }));
+    
+    // Auto-save
+    try {
+      await updateDoc(doc(db, 'stores', store.id), { kioskBackgroundUrl: '' });
+      setShowSaveSuccess(true);
+      setTimeout(() => setShowSaveSuccess(false), 3000);
+    } catch (error) {
+      console.error('Failed to update store doc', error);
+    }
+  };
+
+  const removeQrImage = async () => {
+    if (!store) return;
+    
+    if (formData.qrCodeUrl && formData.qrCodeUrl.startsWith('https://pos-db.columbina.kr/')) {
+      try {
+        await fetch(formData.qrCodeUrl, { method: 'DELETE' });
+      } catch (e) {
+        console.error('Failed to delete old QR image', e);
+      }
+    }
+    
+    setFormData(prev => ({ ...prev, qrCodeUrl: '' }));
+    
+    // Auto-save the removal immediately
+    try {
+      await updateDoc(doc(db, 'stores', store.id), { qrCodeUrl: '' });
+      setShowSaveSuccess(true);
+      setTimeout(() => setShowSaveSuccess(false), 3000);
+    } catch (error) {
+      console.error('Failed to update store doc', error);
     }
   };
 
@@ -190,10 +341,10 @@ export function Settings() {
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-2">키오스크 접속 주소 (변경 불가)</label>
               <div className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-500 font-mono text-sm flex items-center justify-between">
-                <span>https://pos.n-e.kr/#/kiosk/{store?.subdomain}</span>
+                <span>{window.location.origin}/#/kiosk/{store?.subdomain}</span>
                 <button 
                   onClick={() => {
-                    navigator.clipboard.writeText(`https://pos.n-e.kr/#/kiosk/${store?.subdomain}`);
+                    navigator.clipboard.writeText(`${window.location.origin}/#/kiosk/${store?.subdomain}`);
                     alert('주소가 복사되었습니다.');
                   }}
                   className="text-indigo-600 hover:text-indigo-700 font-bold text-xs"
@@ -206,7 +357,79 @@ export function Settings() {
         </div>
       </section>
 
-      {/* 2. 결제 및 정산 설정 */}
+      {/* 2. 테마 및 브랜딩 설정 */}
+      <section className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex items-center gap-3">
+          <Palette className="w-5 h-5 text-purple-600" />
+          <h3 className="font-bold">테마 및 브랜딩 설정</h3>
+        </div>
+        <div className="p-8 space-y-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="space-y-4">
+              <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest">브랜드 이름</h4>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-2">상단 바 표시 이름</label>
+                <div className="relative">
+                  <Monitor className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <input 
+                    type="text"
+                    value={formData.brandName}
+                    onChange={(e) => setFormData({...formData, brandName: e.target.value})}
+                    placeholder="예: NodKrai POS"
+                    className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                  />
+                </div>
+                <p className="mt-2 text-xs text-slate-400">관리자 페이지 상단 바에 표시될 텍스트입니다.</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest">키오스크 배경</h4>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-2">배경화면 이미지</label>
+                <div className="flex gap-4 items-start border border-slate-200 rounded-xl p-4 bg-slate-50/50">
+                  {formData.kioskBackgroundUrl ? (
+                    <div className="relative w-full aspect-video rounded-lg overflow-hidden border border-slate-200 bg-white shadow-sm">
+                      <img src={formData.kioskBackgroundUrl} alt="Kiosk Background Preview" className="w-full h-full object-cover" />
+                      <button
+                        type="button"
+                        onClick={removeBgImage}
+                        className="absolute top-2 right-2 p-2 bg-red-500/90 text-white rounded-full hover:bg-red-600 transition-colors backdrop-blur-sm shadow-sm"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="w-full aspect-video rounded-lg border-2 border-dashed border-slate-300 flex flex-col items-center justify-center text-slate-400 bg-white relative transition-all hover:bg-slate-50 hover:border-slate-400 shadow-sm">
+                      {isUploadingBg ? (
+                        <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <>
+                          <ImageIcon className="w-10 h-10 mb-2 opacity-50" />
+                          <span className="text-xs font-medium">배경 이미지 업로드</span>
+                        </>
+                      )}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleBgUpload}
+                        disabled={isUploadingBg}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+                      />
+                    </div>
+                  )}
+                </div>
+                <p className="mt-2 text-[11px] text-slate-500 leading-relaxed">
+                  키오스크 모드에서 배경화면으로 사용될 이미지입니다.<br/>
+                   이미지를 첨부하면 <span className="font-bold text-indigo-600">즉시 저장</span>되며 WebP 포맷으로 변환됩니다.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 3. 결제 및 정산 설정 */}
       <section className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex items-center gap-3">
           <CreditCard className="w-5 h-5 text-emerald-600" />
@@ -252,20 +475,51 @@ export function Settings() {
             <div className="space-y-4">
               <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest">QR 코드 등록</h4>
               <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">송금 QR 이미지 URL</label>
-                <div className="flex gap-2">
-                  <div className="flex-1 relative">
-                    <QrCode className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                    <input 
-                      type="text"
-                      value={formData.qrCodeUrl}
-                      onChange={(e) => setFormData({...formData, qrCodeUrl: e.target.value})}
-                      placeholder="https://..."
-                      className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                    />
+                <label className="block text-xs font-bold text-slate-500 mb-2">송금 QR 이미지</label>
+                <div className="flex gap-4 items-start border border-slate-200 rounded-xl p-4 bg-slate-50/50">
+                  {formData.qrCodeUrl ? (
+                    <div className="relative w-32 h-32 rounded-lg overflow-hidden border border-slate-200 shrink-0 bg-white shadow-sm">
+                      <img src={formData.qrCodeUrl} alt="QR Code Preview" className="w-full h-full object-contain p-2" />
+                      <button
+                        type="button"
+                        onClick={removeQrImage}
+                        className="absolute top-1 right-1 p-1.5 bg-red-500/90 text-white rounded-full hover:bg-red-600 transition-colors backdrop-blur-sm shadow-sm"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="w-32 h-32 rounded-lg border-2 border-dashed border-slate-300 flex flex-col items-center justify-center text-slate-400 bg-white relative shrink-0 transition-all hover:bg-slate-50 hover:border-slate-400 shadow-sm">
+                      {isUploadingQr ? (
+                        <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <>
+                          <ImageIcon className="w-8 h-8 mb-2 opacity-50" />
+                          <span className="text-xs font-medium">QR 업로드</span>
+                        </>
+                      )}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleQrUpload}
+                        disabled={isUploadingQr}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+                      />
+                    </div>
+                  )}
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded">
+                        <QrCode className="w-4 h-4" />
+                      </div>
+                      <h5 className="font-semibold text-slate-700 text-sm">결제용 QR 코드</h5>
+                    </div>
+                    <p className="text-xs text-slate-500 leading-relaxed">
+                      카카오페이 또는 토스페이의 송금 QR 코드 이미지를 업로드해주세요.<br/><br/>
+                      <span className="font-medium text-slate-700">안내:</span> 이미지를 첨부하면 <span className="font-bold text-indigo-600">즉시 저장</span>되며 WebP 포맷으로 자동 변환됩니다.
+                    </p>
                   </div>
                 </div>
-                <p className="mt-2 text-xs text-slate-400">카카오페이 또는 토스페이의 송금 QR 코드 이미지 주소를 입력해주세요.</p>
               </div>
             </div>
           </div>

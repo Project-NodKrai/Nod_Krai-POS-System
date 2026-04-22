@@ -2,7 +2,7 @@ import React from 'react';
 import { useAuth } from '../AuthContext';
 import { auth } from '../firebase';
 import { GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
-import { LogIn, LogOut, Store as StoreIcon, LayoutDashboard, ShoppingCart, Package, BarChart3, User, Settings as SettingsIcon } from 'lucide-react';
+import { LogIn, LogOut, LayoutDashboard, ShoppingCart, Package, BarChart3, User, Settings as SettingsIcon } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Link, useLocation } from 'react-router-dom';
 
@@ -40,10 +40,9 @@ export function Navbar() {
               to={store ? `/admin/${store.subdomain}/dashboard` : '/'}
               className="flex items-center gap-2 cursor-pointer"
             >
-              <div className="bg-indigo-600 p-1.5 rounded-lg">
-                <StoreIcon className="w-6 h-6 text-white" />
-              </div>
-              <span className="font-display font-bold text-xl tracking-tight">NodKrai POS</span>
+              <span className="font-display font-bold text-xl tracking-tight">
+                {store?.brandName || 'NodKrai POS'}
+              </span>
             </Link>
 
             {user && store && (
